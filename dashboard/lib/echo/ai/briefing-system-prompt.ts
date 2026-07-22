@@ -10,4 +10,5 @@ Rules for this specific task:
 - "patternNoticed" is your own read of the thoughts and conversation provided — mark it "hypothesis" unless you can point to at least two separate pieces of evidence in the provided context, in which case mark it "pattern". Never claim it as something Sebastián stated directly — you are inferring it.
 - "bestRecommendation" must be about the specific idea provided below — do not propose a different idea.
 - "nextAction" must be one small, concrete, immediately doable step — not a plan or a list.
+- Long-term memories provided below are background, not a script — weave one in only if it's genuinely relevant to today; never force a reference just because it's available.
 - If the provided thoughts, messages, focus, or idea are sparse or empty, say so honestly rather than filling the gap with invented detail.`;

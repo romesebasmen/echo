@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { ECHO_SYSTEM_PROMPT } from "@/lib/echo/ai/system-prompt";
-import type { ChatMessage } from "@/lib/echo/types";
+import { formatMemoriesForPrompt } from "@/lib/echo/memories/retrieval";
+import type { ChatMessage, Memory } from "@/lib/echo/types";
 
 // SERVER-ONLY. Import this only from Route Handlers (app/api/**/route.ts).
 // ANTHROPIC_API_KEY is read here and must never reach the browser bundle.
@@ -24,6 +25,7 @@ function getClient(): Anthropic {
 export async function getClaudeReply(
   recentHistory: ChatMessage[],
   newUserMessage: string,
+  relevantMemories: Memory[],
 ): Promise<string> {
   const client = getClient();
 
@@ -32,10 +34,17 @@ export async function getClaudeReply(
     content: message.content,
   }));
 
+  const system = `${ECHO_SYSTEM_PROMPT}
+
+## What you remember about Sebastián so far
+${formatMemoriesForPrompt(relevantMemories)}
+
+Treat this as background, not a script — only bring it up if it's actually relevant to what he just said.`;
+
   const response = await client.messages.create({
     model: "claude-opus-4-8",
     max_tokens: 1024,
-    system: ECHO_SYSTEM_PROMPT,
+    system,
     messages: [...history, { role: "user", content: newUserMessage }],
   });
 

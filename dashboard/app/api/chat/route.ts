@@ -1,3 +1,4 @@
+import { after } from "next/server";
 import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
 import { getMockEchoReply } from "@/lib/echo/chat/mock-responder";
 import { getClaudeReply } from "@/lib/echo/ai/claude-responder";
@@ -7,8 +8,13 @@ import {
   getRecentMessages,
   toMessage,
 } from "@/lib/echo/chat/conversation-store";
+import { getRelevantMemories } from "@/lib/echo/memories/retrieval";
+import { extractAndApplyMemories } from "@/lib/echo/memories/extraction-service";
+import { formatError } from "@/lib/echo/errors";
+import type { Memory } from "@/lib/echo/types";
 
 const RECENT_HISTORY_LIMIT = 20;
+const RELEVANT_MEMORY_LIMIT = 20;
 
 export async function GET() {
   try {
@@ -28,7 +34,7 @@ export async function GET() {
       messages: (data ?? []).map(toMessage),
     });
   } catch (error) {
-    console.error("GET /api/chat failed:", error);
+    console.error("GET /api/chat failed:", formatError(error));
     return Response.json({ error: "Could not load conversation." }, { status: 500 });
   }
 }
@@ -49,6 +55,17 @@ export async function POST(request: Request) {
     // it doesn't need to be de-duplicated against `content` below.
     const recentHistory = await getRecentMessages(RECENT_HISTORY_LIMIT);
 
+    let relevantMemories: Memory[];
+    try {
+      relevantMemories = await getRelevantMemories(RELEVANT_MEMORY_LIMIT);
+    } catch (memoryError) {
+      console.error(
+        "Fetching relevant memories failed, continuing without them:",
+        formatError(memoryError),
+      );
+      relevantMemories = [];
+    }
+
     const { data: userRow, error: userError } = await supabase
       .from("messages")
       .insert({ conversation_id: conversationId, role: fromRole("user"), content })
@@ -59,11 +76,11 @@ export async function POST(request: Request) {
 
     let replyText: string;
     try {
-      replyText = await getClaudeReply(recentHistory, content);
+      replyText = await getClaudeReply(recentHistory, content, relevantMemories);
     } catch (aiError) {
       console.error(
         "Claude API call failed, falling back to mock responder:",
-        aiError,
+        formatError(aiError),
       );
       replyText = getMockEchoReply(content);
     }
@@ -87,12 +104,30 @@ export async function POST(request: Request) {
 
     if (touchError) throw touchError;
 
+    // Memory extraction runs after the response is sent — its failure must
+    // never affect the chat reply the user already received.
+    after(async () => {
+      try {
+        const appliedCount = await extractAndApplyMemories({
+          userMessage: content,
+          echoReply: replyText,
+          sourceMessageId: userRow.id as string,
+          sourceType: "chat",
+        });
+        if (appliedCount > 0) {
+          console.log(`Memory extraction applied ${appliedCount} operation(s).`);
+        }
+      } catch (extractionError) {
+        console.error("Memory extraction failed:", formatError(extractionError));
+      }
+    });
+
     return Response.json(
       { userMessage: toMessage(userRow), echoMessage: toMessage(echoRow) },
       { status: 201 },
     );
   } catch (error) {
-    console.error("POST /api/chat failed:", error);
+    console.error("POST /api/chat failed:", formatError(error));
     return Response.json({ error: "Could not send message." }, { status: 500 });
   }
 }
@@ -111,7 +146,7 @@ export async function DELETE() {
 
     return Response.json({ ok: true });
   } catch (error) {
-    console.error("DELETE /api/chat failed:", error);
+    console.error("DELETE /api/chat failed:", formatError(error));
     return Response.json({ error: "Could not clear conversation." }, { status: 500 });
   }
 }

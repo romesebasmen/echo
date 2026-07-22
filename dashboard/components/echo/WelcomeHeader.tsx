@@ -7,12 +7,20 @@ export function WelcomeHeader() {
       <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
         Hi {creatorProfile.name}. Here&rsquo;s what you missed.
       </h1>
-      <Link
-        href="/chat"
-        className="text-sm font-medium text-muted transition-colors hover:text-accent"
-      >
-        Talk to Echo →
-      </Link>
+      <div className="flex gap-4">
+        <Link
+          href="/memories"
+          className="text-sm font-medium text-muted transition-colors hover:text-accent"
+        >
+          Memories →
+        </Link>
+        <Link
+          href="/chat"
+          className="text-sm font-medium text-muted transition-colors hover:text-accent"
+        >
+          Talk to Echo →
+        </Link>
+      </div>
     </header>
   );
 }

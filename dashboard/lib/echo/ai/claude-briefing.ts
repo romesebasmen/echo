@@ -16,6 +16,7 @@ export interface BriefingGenerationInput {
     hook: string;
     whyItFits: string;
   };
+  relevantMemories: { category: string; title: string; description: string }[];
   thoughtCountSinceLastBriefing: number;
   messageCountSinceLastBriefing: number;
 }
@@ -123,11 +124,20 @@ function buildUserPrompt(input: BriefingGenerationInput): string {
         .join("\n")
     : "(no chat history)";
 
+  const memoriesBlock = input.relevantMemories.length
+    ? input.relevantMemories
+        .map((memory) => `- [${memory.category}] ${memory.title}: ${memory.description}`)
+        .join("\n")
+    : "(no stored memories yet)";
+
   return `Here is Sebastián's current stored context. Use only this — do not invent anything beyond it.
 
 Activity since the last briefing:
 - ${input.thoughtCountSinceLastBriefing} new thought(s)
 - ${input.messageCountSinceLastBriefing} new chat message(s)
+
+What Echo remembers about Sebastián long-term (use only if relevant — don't force it in):
+${memoriesBlock}
 
 Recent thoughts (most recent first, up to 10):
 ${thoughtsBlock}

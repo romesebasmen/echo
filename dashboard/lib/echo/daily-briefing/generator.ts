@@ -3,6 +3,8 @@ import { getRecentThoughts } from "@/lib/echo/thoughts/repository";
 import { getCurrentFocus } from "@/lib/echo/daily-briefing/service";
 import { getBestIdea } from "@/lib/echo/content-ideas/service";
 import { generateBriefingContent } from "@/lib/echo/ai/claude-briefing";
+import { getRelevantMemories } from "@/lib/echo/memories/retrieval";
+import { formatError } from "@/lib/echo/errors";
 import {
   getBriefingForDate,
   getMostRecentBriefing,
@@ -13,16 +15,30 @@ import type { DailyBriefing } from "@/lib/echo/types";
 
 const RECENT_MESSAGE_LIMIT = 20;
 const RECENT_THOUGHT_LIMIT = 10;
+const RELEVANT_MEMORY_LIMIT = 15;
 
 async function buildAndSaveBriefing(): Promise<DailyBriefing> {
-  const [recentMessages, recentThoughts, currentFocus, bestIdea, previousBriefing] =
-    await Promise.all([
-      getRecentMessages(RECENT_MESSAGE_LIMIT),
-      getRecentThoughts(RECENT_THOUGHT_LIMIT),
-      getCurrentFocus(),
-      getBestIdea(),
-      getMostRecentBriefing(),
-    ]);
+  const [
+    recentMessages,
+    recentThoughts,
+    currentFocus,
+    bestIdea,
+    previousBriefing,
+    relevantMemories,
+  ] = await Promise.all([
+    getRecentMessages(RECENT_MESSAGE_LIMIT),
+    getRecentThoughts(RECENT_THOUGHT_LIMIT),
+    getCurrentFocus(),
+    getBestIdea(),
+    getMostRecentBriefing(),
+    getRelevantMemories(RELEVANT_MEMORY_LIMIT).catch((error: unknown) => {
+      console.error(
+        "Fetching relevant memories for briefing failed, continuing without them:",
+        formatError(error),
+      );
+      return [];
+    }),
+  ]);
 
   // "Since last briefing" only looks within the already-fetched recent
   // windows (last 20 messages / 10 thoughts) — if more than that arrived
@@ -56,6 +72,11 @@ async function buildAndSaveBriefing(): Promise<DailyBriefing> {
       hook: bestIdea.hook,
       whyItFits: bestIdea.whyItFits,
     },
+    relevantMemories: relevantMemories.map((memory) => ({
+      category: memory.category,
+      title: memory.title,
+      description: memory.description,
+    })),
     thoughtCountSinceLastBriefing,
     messageCountSinceLastBriefing,
   });
