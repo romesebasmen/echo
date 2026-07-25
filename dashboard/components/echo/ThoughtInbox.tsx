@@ -3,10 +3,27 @@
 import { useId, useState, type FormEvent } from "react";
 import type { Thought } from "@/lib/echo/types";
 import { useThoughts } from "@/lib/echo/thoughts/useThoughts";
+import { useCreativeWorks } from "@/lib/echo/creative-works/useCreativeWorks";
 
 export function ThoughtInbox() {
   const { thoughts, isLoading, isSaving, error, createThought, updateThought, deleteThought } =
     useThoughts();
+
+  const { createFromThought } = useCreativeWorks();
+  const [addedThoughtIds, setAddedThoughtIds] = useState<Set<string>>(new Set());
+  const [pendingThoughtId, setPendingThoughtId] = useState<string | null>(null);
+
+  // Guards against a second click landing before the first request
+  // resolves — on top of the server-side duplicate-origin check.
+  async function handleAddToTikTok(thoughtId: string) {
+    if (pendingThoughtId) return;
+    setPendingThoughtId(thoughtId);
+    const success = await createFromThought(thoughtId);
+    if (success) {
+      setAddedThoughtIds((previous) => new Set(previous).add(thoughtId));
+    }
+    setPendingThoughtId(null);
+  }
 
   const [rawThought, setRawThought] = useState("");
   const [context, setContext] = useState("");
@@ -212,7 +229,19 @@ export function ThoughtInbox() {
                     })}
                   </p>
                 </div>
-                <div className="flex shrink-0 gap-3">
+                <div className="flex shrink-0 items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => handleAddToTikTok(thought.id)}
+                    disabled={pendingThoughtId === thought.id || addedThoughtIds.has(thought.id)}
+                    className="text-sm text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {addedThoughtIds.has(thought.id)
+                      ? "Added ✓"
+                      : pendingThoughtId === thought.id
+                        ? "Adding…"
+                        : "Turn into TikTok idea"}
+                  </button>
                   <button
                     type="button"
                     onClick={() => startEditing(thought)}

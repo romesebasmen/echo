@@ -41,3 +41,20 @@ export async function getRecentThoughts(limit: number): Promise<Thought[]> {
 
   return (data ?? []).map(toThought);
 }
+
+// Scoped to USER_ID so callers get ownership verification for free — a
+// thought belonging to another user (hypothetically) simply won't be found.
+export async function getThoughtById(id: string): Promise<Thought | null> {
+  const supabase = getSupabaseServerClient();
+
+  const { data, error } = await supabase
+    .from("thoughts")
+    .select("*")
+    .eq("id", id)
+    .eq("user_id", USER_ID)
+    .maybeSingle();
+
+  if (error) throw error;
+
+  return data ? toThought(data as ThoughtRow) : null;
+}

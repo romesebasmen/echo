@@ -15,6 +15,12 @@ export function WelcomeHeader() {
           Memories →
         </Link>
         <Link
+          href="/tiktok"
+          className="text-sm font-medium text-muted transition-colors hover:text-accent"
+        >
+          TikTok Ideas →
+        </Link>
+        <Link
           href="/chat"
           className="text-sm font-medium text-muted transition-colors hover:text-accent"
         >
