@@ -6,3 +6,6 @@ export * from "@/lib/echo/types/memory";
 export * from "@/lib/echo/types/content-idea";
 export * from "@/lib/echo/types/daily-briefing";
 export * from "@/lib/echo/types/creative-work";
+export * from "@/lib/echo/types/responsibility-area";
+export * from "@/lib/echo/types/task";
+export * from "@/lib/echo/types/day-plan";

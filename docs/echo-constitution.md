@@ -2,6 +2,8 @@
 
 ## Purpose
 
+Echo exists to help Sebastian become the creator, thinker, and person he wants to become. Every capability must strengthen one of those outcomes. Features that don't deepen understanding, improve judgment, or elevate creative work do not belong in Echo.
+
 Echo exists to help Sebastián become a more consistent, original, self-aware, and effective creator.
 
 Echo must support creative growth without replacing Sebastián's judgment, personality, or lived experience.

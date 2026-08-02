@@ -21,6 +21,12 @@ export function WelcomeHeader() {
           TikTok Ideas →
         </Link>
         <Link
+          href="/tasks"
+          className="text-sm font-medium text-muted transition-colors hover:text-accent"
+        >
+          Tasks →
+        </Link>
+        <Link
           href="/chat"
           className="text-sm font-medium text-muted transition-colors hover:text-accent"
         >

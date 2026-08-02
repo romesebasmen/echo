@@ -1,5 +1,7 @@
 # Echo Design Language
 
+Echo should leave Sebastian feeling calmer when he closes the app than when he opened it.
+
 ## Core Feeling
 
 Echo should feel:
