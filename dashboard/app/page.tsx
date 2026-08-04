@@ -5,6 +5,7 @@ import { BestIdea } from "@/components/echo/BestIdea";
 import { OnYourRadar } from "@/components/echo/OnYourRadar";
 import { ThoughtInbox } from "@/components/echo/ThoughtInbox";
 import { CurrentFocus } from "@/components/echo/CurrentFocus";
+import { DailyCheckInPanel } from "@/components/echo/day-plan/DailyCheckInPanel";
 import {
   getCurrentFocus,
   getEngagementSnapshot,
@@ -24,6 +25,7 @@ export default async function Home() {
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-col gap-16 px-6 py-12 sm:gap-20 sm:py-16 lg:max-w-4xl lg:px-12">
       <WelcomeHeader />
+      <DailyCheckInPanel />
       <DailyBriefing />
       <EngagementTracker snapshot={engagementSnapshot} />
       <BestIdea idea={bestIdea} />

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {
   DayPlanNotFoundError,
   generateAndPersistDayPlan,
+  IncompleteCheckInError,
+  InvalidCheckInStateError,
   type GenerateAndPersistDayPlanDeps,
 } from "./service.ts";
 import type { Commitment, DayPlan, ScheduleBlock } from "../types/day-plan.ts";
@@ -55,6 +57,11 @@ function fakeDayPlan(overrides: Partial<DayPlan> = {}): DayPlan {
     planDate: "2026-07-23",
     availableFrom: "2026-07-23T13:00:00Z",
     energy: 6,
+    stress: 3,
+    sleepQuality: "good",
+    hasEaten: true,
+    checkInNotes: null,
+    checkInCompletedAt: "2026-07-23T12:55:00Z",
     endOfWorkTime: "2026-07-23T20:00:00Z",
     status: "setup",
     createdAt: "2026-07-23T10:00:00Z",
@@ -73,6 +80,7 @@ interface MockDepsOptions {
   tasks?: Task[];
   commitments?: Commitment[];
   persistedBlocksOverride?: ScheduleBlock[];
+  persistenceError?: Error;
 }
 
 function createMockDeps(options: MockDepsOptions = {}) {
@@ -95,10 +103,17 @@ function createMockDeps(options: MockDepsOptions = {}) {
       calls.push({ fn: "listCommitments", args: [dayPlanId] });
       return commitments.filter((commitment) => commitment.dayPlanId === dayPlanId);
     },
-    async replaceScheduleBlocks(dayPlanId, blocks: DraftScheduleBlock[]) {
-      calls.push({ fn: "replaceScheduleBlocks", args: [dayPlanId, blocks] });
-      if (options.persistedBlocksOverride) return options.persistedBlocksOverride;
-      return blocks.map((block) => {
+    async persistGeneratedSchedule(
+      dayPlanId,
+      expectedCheckInCompletedAt,
+      blocks: DraftScheduleBlock[],
+    ) {
+      calls.push({
+        fn: "persistGeneratedSchedule",
+        args: [dayPlanId, expectedCheckInCompletedAt, blocks],
+      });
+      if (options.persistenceError) throw options.persistenceError;
+      const scheduleBlocks = options.persistedBlocksOverride ?? blocks.map((block) => {
         persistedIdCounter += 1;
         const persisted: ScheduleBlock = {
           id: `persisted-block-${persistedIdCounter}`,
@@ -116,11 +131,16 @@ function createMockDeps(options: MockDepsOptions = {}) {
         };
         return persisted;
       });
-    },
-    async updateDayPlanStatus(id, status) {
-      calls.push({ fn: "updateDayPlanStatus", args: [id, status] });
       if (!dayPlan) throw new Error("no day plan available to update in this mock");
-      return { ...dayPlan, id, status, updatedAt: "2026-07-23T13:05:00Z" };
+      return {
+        dayPlan: {
+          ...dayPlan,
+          id: dayPlanId,
+          status: "generated" as const,
+          updatedAt: "2026-07-23T13:05:00Z",
+        },
+        scheduleBlocks,
+      };
     },
   };
 
@@ -138,6 +158,8 @@ test("generateAndPersistDayPlan generates a plan from tasks and commitments", as
   const commitmentBlock = result.scheduleBlocks.find((b) => b.sourceType === "commitment");
   assert.equal(taskBlock?.sourceId, task.id);
   assert.equal(commitmentBlock?.sourceId, commitment.id);
+  assert.equal(result.planningContext.effectiveEnergy, 6);
+  assert.equal(result.planningContext.capacityTier, "steady");
 });
 
 test("generateAndPersistDayPlan passes the correct inputs to the scheduler (via listTasks call args)", async () => {
@@ -169,19 +191,19 @@ test("generateAndPersistDayPlan persists the blocks the scheduler returned", asy
 
   await generateAndPersistDayPlan("2026-07-23", deps, NOW);
 
-  const persistCall = calls.find((c) => c.fn === "replaceScheduleBlocks");
+  const persistCall = calls.find((c) => c.fn === "persistGeneratedSchedule");
   assert.equal(persistCall?.args[0], "plan-1");
-  const blocksArg = persistCall?.args[1] as DraftScheduleBlock[];
+  assert.equal(persistCall?.args[1], "2026-07-23T12:55:00Z");
+  const blocksArg = persistCall?.args[2] as DraftScheduleBlock[];
   assert.equal(blocksArg.some((b) => b.sourceId === task.id), true);
 });
 
-test("generateAndPersistDayPlan updates the day plan status to generated", async () => {
+test("generateAndPersistDayPlan atomically replaces blocks and marks the plan generated", async () => {
   const { deps, calls } = createMockDeps({ tasks: [], commitments: [] });
 
   const result = await generateAndPersistDayPlan("2026-07-23", deps, NOW);
 
-  const statusCall = calls.find((c) => c.fn === "updateDayPlanStatus");
-  assert.deepEqual(statusCall?.args, ["plan-1", "generated"]);
+  assert.equal(calls.filter((c) => c.fn === "persistGeneratedSchedule").length, 1);
   assert.equal(result.dayPlan.status, "generated");
 });
 
@@ -211,6 +233,36 @@ test("generateAndPersistDayPlan throws DayPlanNotFoundError for a missing day pl
   );
 });
 
+test("generateAndPersistDayPlan rejects an incomplete check-in before loading plan inputs", async () => {
+  const { deps, calls } = createMockDeps({
+    dayPlan: fakeDayPlan({
+      stress: null,
+      sleepQuality: null,
+      hasEaten: null,
+      checkInCompletedAt: null,
+    }),
+  });
+
+  await assert.rejects(
+    () => generateAndPersistDayPlan("2026-07-23", deps, NOW),
+    IncompleteCheckInError,
+  );
+  assert.deepEqual(
+    calls.map((call) => call.fn),
+    ["getDayPlanForDate"],
+  );
+});
+
+test("generateAndPersistDayPlan rejects invalid completed check-in values with a typed error", async () => {
+  const { deps, calls } = createMockDeps({ dayPlan: fakeDayPlan({ energy: 11 }) });
+
+  await assert.rejects(
+    () => generateAndPersistDayPlan("2026-07-23", deps, NOW),
+    InvalidCheckInStateError,
+  );
+  assert.equal(calls.some((call) => call.fn === "persistGeneratedSchedule"), false);
+});
+
 test("generateAndPersistDayPlan preserves commitment blocks correctly (title, times, area, source)", async () => {
   const commitment = fakeCommitment({
     dayPlanId: "plan-1",
@@ -229,4 +281,49 @@ test("generateAndPersistDayPlan preserves commitment blocks correctly (title, ti
   assert.equal(block?.startTime, "2026-07-23T14:00:00Z");
   assert.equal(block?.endTime, "2026-07-23T15:00:00Z");
   assert.equal(block?.responsibilityArea, "health");
+});
+
+test("failed atomic regeneration leaves the previous valid schedule untouched", async () => {
+  const previousSchedule = [{ id: "previous-block", title: "Previous valid plan" }];
+  const before = structuredClone(previousSchedule);
+  const { deps } = createMockDeps({
+    tasks: [fakeTask()],
+    persistenceError: new Error("transaction rolled back"),
+  });
+
+  await assert.rejects(
+    () => generateAndPersistDayPlan("2026-07-23", deps, NOW),
+    /transaction rolled back/,
+  );
+  assert.deepEqual(previousSchedule, before);
+});
+
+test("repeated concurrent generation uses replacement semantics without duplicate block sets", async () => {
+  const task = fakeTask({ title: "Only task" });
+  const { deps } = createMockDeps({ tasks: [task] });
+  let stored: DraftScheduleBlock[] = [];
+
+  deps.persistGeneratedSchedule = async (dayPlanId, _expectedVersion, blocks) => {
+    await Promise.resolve();
+    stored = blocks.map((block) => ({ ...block }));
+    return {
+      dayPlan: fakeDayPlan({ id: dayPlanId, status: "generated" }),
+      scheduleBlocks: stored.map((block, index) => ({
+        ...block,
+        id: `stored-${index}`,
+        dayPlanId,
+        createdAt: NOW.toISOString(),
+        updatedAt: NOW.toISOString(),
+      })),
+    };
+  };
+
+  await Promise.all([
+    generateAndPersistDayPlan("2026-07-23", deps, NOW),
+    generateAndPersistDayPlan("2026-07-23", deps, NOW),
+  ]);
+
+  const taskBlocks = stored.filter((block) => block.sourceType === "task");
+  assert.equal(taskBlocks.length, 1);
+  assert.equal(taskBlocks[0].sourceId, task.id);
 });

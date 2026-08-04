@@ -4,6 +4,7 @@
 import { scoreTask } from "../tasks/scoring.ts";
 import type { ResponsibilityArea } from "../types/responsibility-area.ts";
 import type { Task } from "../types/task.ts";
+import type { PlanningContext } from "../types/planning-context.ts";
 import type {
   Commitment,
   ScheduleBlock,
@@ -18,8 +19,6 @@ import type {
 // it never replaces this arithmetic.
 
 const DEFAULT_TASK_MINUTES = 30;
-const BREAK_AFTER_MINUTES = 90;
-const BREAK_DURATION_MINUTES = 10;
 const MS_PER_MINUTE = 60 * 1000;
 
 export interface DraftScheduleBlock {
@@ -97,9 +96,46 @@ function pickIntervalIndex(
     .index;
 }
 
+function requiresBreakBeforeTask(
+  interval: WorkInterval,
+  durationMinutes: number,
+  planningContext: PlanningContext,
+): boolean {
+  return (
+    interval.continuousMinutes > 0 &&
+    interval.continuousMinutes + durationMinutes > planningContext.breakAfterMinutes
+  );
+}
+
+function pickTaskIntervalIndex(
+  intervals: WorkInterval[],
+  durationMinutes: number,
+  deepWork: boolean,
+  planningContext: PlanningContext,
+): number {
+  const fitting = intervals
+    .map((interval, index) => {
+      const requiredMinutes =
+        durationMinutes +
+        (requiresBreakBeforeTask(interval, durationMinutes, planningContext)
+          ? planningContext.breakDurationMinutes
+          : 0);
+      return { index, remaining: intervalMinutes(interval), requiredMinutes };
+    })
+    .filter(({ remaining, requiredMinutes }) => remaining >= requiredMinutes);
+
+  if (fitting.length === 0) return -1;
+  if (!deepWork) return fitting[0].index;
+
+  return fitting.reduce((best, current) =>
+    current.remaining > best.remaining ? current : best,
+  ).index;
+}
+
 function packTasksIntoIntervals(
   scoredTasks: { task: Task; score: number }[],
   freeIntervals: WorkInterval[],
+  planningContext: PlanningContext,
 ): { blocks: DraftScheduleBlock[]; unscheduled: Task[] } {
   // Stable sort by score descending; ties broken explicitly by task id so
   // the ordering never depends on incoming array order or engine-specific
@@ -111,10 +147,22 @@ function packTasksIntoIntervals(
   const intervals = freeIntervals.map((interval) => ({ ...interval }));
   const blocks: DraftScheduleBlock[] = [];
   const unscheduled: Task[] = [];
+  let scheduledTaskMinutes = 0;
 
   for (const { task } of ordered) {
     const duration = task.estimatedMinutes ?? DEFAULT_TASK_MINUTES;
-    const index = pickIntervalIndex(intervals, duration, task.deepWork);
+
+    if (scheduledTaskMinutes + duration > planningContext.maxScheduledTaskMinutes) {
+      unscheduled.push(task);
+      continue;
+    }
+
+    const index = pickTaskIntervalIndex(
+      intervals,
+      duration,
+      task.deepWork,
+      planningContext,
+    );
 
     if (index === -1) {
       unscheduled.push(task);
@@ -123,13 +171,9 @@ function packTasksIntoIntervals(
 
     const interval = intervals[index];
 
-    if (
-      interval.continuousMinutes > 0 &&
-      interval.continuousMinutes + duration > BREAK_AFTER_MINUTES &&
-      intervalMinutes(interval) >= duration + BREAK_DURATION_MINUTES
-    ) {
+    if (requiresBreakBeforeTask(interval, duration, planningContext)) {
       const breakStart = interval.startMs;
-      const breakEnd = breakStart + BREAK_DURATION_MINUTES * MS_PER_MINUTE;
+      const breakEnd = breakStart + planningContext.breakDurationMinutes * MS_PER_MINUTE;
       blocks.push({
         sourceType: "break",
         sourceId: null,
@@ -142,11 +186,6 @@ function packTasksIntoIntervals(
       });
       interval.startMs = breakEnd;
       interval.continuousMinutes = 0;
-    }
-
-    if (intervalMinutes(interval) < duration) {
-      unscheduled.push(task);
-      continue;
     }
 
     const taskStart = interval.startMs;
@@ -164,6 +203,7 @@ function packTasksIntoIntervals(
 
     interval.startMs = taskEnd;
     interval.continuousMinutes += duration;
+    scheduledTaskMinutes += duration;
   }
 
   return { blocks, unscheduled };
@@ -175,7 +215,7 @@ export interface GenerateScheduleInput {
   commitments: Commitment[];
   availableFrom: Date;
   endOfWorkTime: Date;
-  currentEnergy: number;
+  planningContext: PlanningContext;
   now: Date;
 }
 
@@ -208,10 +248,17 @@ export function generateSchedule(input: GenerateScheduleInput): GenerateSchedule
 
   const scoredTasks = input.tasks.map((task) => ({
     task,
-    score: scoreTask(task, { now: input.now, currentEnergy: input.currentEnergy }),
+    score: scoreTask(task, {
+      now: input.now,
+      currentEnergy: input.planningContext.effectiveEnergy,
+    }),
   }));
 
-  const { blocks: taskBlocks, unscheduled } = packTasksIntoIntervals(scoredTasks, freeIntervals);
+  const { blocks: taskBlocks, unscheduled } = packTasksIntoIntervals(
+    scoredTasks,
+    freeIntervals,
+    input.planningContext,
+  );
 
   const blocks = [...commitmentBlocks, ...taskBlocks]
     .sort((a, b) => toMs(a.startTime) - toMs(b.startTime))

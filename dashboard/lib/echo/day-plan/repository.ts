@@ -1,10 +1,12 @@
-import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
+import { getSupabaseServerClient } from "../supabase/server-client.ts";
 import type {
   Commitment,
   DayPlan,
   DayPlanStatus,
   ResponsibilityArea,
-} from "@/lib/echo/types";
+  SleepQuality,
+} from "../types/index.ts";
+import { throwIfDailyCheckInMigrationMissing } from "./migration-error.ts";
 
 const USER_ID = "sebastian";
 
@@ -22,12 +24,17 @@ export class MissingCommitmentsTableError extends Error {
   }
 }
 
-interface DayPlanRow {
+export interface DayPlanRow {
   id: string;
   user_id: string;
   plan_date: string;
   available_from: string;
   energy: number;
+  stress?: number | null;
+  sleep_quality?: string | null;
+  has_eaten?: boolean | null;
+  check_in_notes?: string | null;
+  check_in_completed_at?: string | null;
   end_of_work_time: string;
   status: string;
   created_at: string;
@@ -57,13 +64,18 @@ function isMissingTableError(error: PostgrestErrorLike): boolean {
   );
 }
 
-function toDayPlan(row: DayPlanRow): DayPlan {
+export function mapDayPlanRow(row: DayPlanRow): DayPlan {
   return {
     id: row.id,
     userId: row.user_id,
     planDate: row.plan_date,
     availableFrom: row.available_from,
     energy: row.energy,
+    stress: row.stress ?? null,
+    sleepQuality: (row.sleep_quality ?? null) as SleepQuality | null,
+    hasEaten: row.has_eaten ?? null,
+    checkInNotes: row.check_in_notes ?? null,
+    checkInCompletedAt: row.check_in_completed_at ?? null,
     endOfWorkTime: row.end_of_work_time,
     status: row.status as DayPlanStatus,
     createdAt: row.created_at,
@@ -88,76 +100,59 @@ export async function getDayPlanForDate(planDate: string): Promise<DayPlan | nul
 
   const { data, error } = await supabase
     .from("day_plans")
-    .select("*")
+    .select(
+      "id,user_id,plan_date,available_from,energy,stress,sleep_quality,has_eaten,check_in_notes,check_in_completed_at,end_of_work_time,status,created_at,updated_at",
+    )
     .eq("user_id", USER_ID)
     .eq("plan_date", planDate)
     .maybeSingle();
 
   if (error) {
+    throwIfDailyCheckInMigrationMissing(error);
     if (isMissingTableError(error)) throw new MissingDayPlansTableError();
     throw error;
   }
 
-  return data ? toDayPlan(data as DayPlanRow) : null;
+  return data ? mapDayPlanRow(data as DayPlanRow) : null;
 }
 
-export interface UpsertDayPlanInput {
+export interface SaveDayPlanCheckInInput {
   planDate: string;
   availableFrom: string;
   energy: number;
+  stress: number;
+  sleepQuality: SleepQuality;
+  hasEaten: boolean;
+  checkInNotes: string | null;
+  checkInCompletedAt: string;
   endOfWorkTime: string;
-  status?: DayPlanStatus;
 }
 
 // Upserts on (user_id, plan_date), same convention as daily_briefings — at
 // most one plan per user per day.
-export async function upsertDayPlan(input: UpsertDayPlanInput): Promise<DayPlan> {
+export async function saveDayPlanCheckIn(input: SaveDayPlanCheckInInput): Promise<DayPlan> {
   const supabase = getSupabaseServerClient();
 
-  const { data, error } = await supabase
-    .from("day_plans")
-    .upsert(
-      {
-        user_id: USER_ID,
-        plan_date: input.planDate,
-        available_from: input.availableFrom,
-        energy: input.energy,
-        end_of_work_time: input.endOfWorkTime,
-        status: input.status ?? "setup",
-      },
-      { onConflict: "user_id,plan_date" },
-    )
-    .select("*")
-    .single();
+  const { data, error } = await supabase.rpc("save_day_plan_check_in", {
+    p_user_id: USER_ID,
+    p_plan_date: input.planDate,
+    p_available_from: input.availableFrom,
+    p_energy: input.energy,
+    p_stress: input.stress,
+    p_sleep_quality: input.sleepQuality,
+    p_has_eaten: input.hasEaten,
+    p_check_in_notes: input.checkInNotes,
+    p_check_in_completed_at: input.checkInCompletedAt,
+    p_end_of_work_time: input.endOfWorkTime,
+  });
 
   if (error) {
+    throwIfDailyCheckInMigrationMissing(error);
     if (isMissingTableError(error)) throw new MissingDayPlansTableError();
     throw error;
   }
 
-  return toDayPlan(data as DayPlanRow);
-}
-
-export async function updateDayPlanStatus(
-  id: string,
-  status: DayPlanStatus,
-): Promise<DayPlan> {
-  const supabase = getSupabaseServerClient();
-
-  const { data, error } = await supabase
-    .from("day_plans")
-    .update({ status, updated_at: new Date().toISOString() })
-    .eq("id", id)
-    .eq("user_id", USER_ID)
-    .select("*")
-    .single();
-
-  if (error) {
-    if (isMissingTableError(error)) throw new MissingDayPlansTableError();
-    throw error;
-  }
-
-  return toDayPlan(data as DayPlanRow);
+  return mapDayPlanRow(data as DayPlanRow);
 }
 
 export async function listCommitments(dayPlanId: string): Promise<Commitment[]> {

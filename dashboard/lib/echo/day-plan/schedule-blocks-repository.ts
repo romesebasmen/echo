@@ -1,11 +1,14 @@
 import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
 import type {
+  DayPlan,
   ResponsibilityArea,
   ScheduleBlock,
   ScheduleBlockSourceType,
   ScheduleBlockStatus,
 } from "@/lib/echo/types";
 import type { DraftScheduleBlock } from "@/lib/echo/day-plan/scheduler";
+import { mapDayPlanRow, type DayPlanRow } from "@/lib/echo/day-plan/repository";
+import { throwIfDailyCheckInMigrationMissing } from "@/lib/echo/day-plan/migration-error";
 
 // No USER_ID filtering here — schedule_blocks is scoped indirectly through
 // day_plan_id (day_plans.user_id), the same pattern commitments uses.
@@ -16,6 +19,13 @@ export class MissingScheduleBlocksTableError extends Error {
   constructor() {
     super("The schedule_blocks table does not exist yet. See the setup SQL to create it.");
     this.name = "MissingScheduleBlocksTableError";
+  }
+}
+
+export class CheckInChangedDuringGenerationError extends Error {
+  constructor() {
+    super("The daily check-in changed while the plan was being generated. Build the plan again.");
+    this.name = "CheckInChangedDuringGenerationError";
   }
 }
 
@@ -47,7 +57,7 @@ function isMissingTableError(error: PostgrestErrorLike): boolean {
   );
 }
 
-function toScheduleBlock(row: ScheduleBlockRow): ScheduleBlock {
+export function toScheduleBlock(row: ScheduleBlockRow): ScheduleBlock {
   return {
     id: row.id,
     dayPlanId: row.day_plan_id,
@@ -85,50 +95,53 @@ export async function listScheduleBlocks(dayPlanId: string): Promise<ScheduleBlo
 // generated/repacked set in its place — the persistence step for whatever
 // lib/echo/day-plan/scheduler.ts (generateSchedule or repackFrom) computed.
 // This function does not decide the timeline; it only stores it.
-export async function replaceScheduleBlocks(
+export interface PersistGeneratedScheduleResult {
+  dayPlan: DayPlan;
+  scheduleBlocks: ScheduleBlock[];
+}
+
+interface PersistGeneratedScheduleRow {
+  day_plan: DayPlanRow;
+  schedule_blocks: ScheduleBlockRow[];
+}
+
+export async function persistGeneratedSchedule(
   dayPlanId: string,
+  expectedCheckInCompletedAt: string,
   blocks: DraftScheduleBlock[],
-): Promise<ScheduleBlock[]> {
+): Promise<PersistGeneratedScheduleResult> {
   const supabase = getSupabaseServerClient();
 
-  const { error: deleteError } = await supabase
-    .from("schedule_blocks")
-    .delete()
-    .eq("day_plan_id", dayPlanId);
+  const { data, error } = await supabase.rpc("replace_day_plan_schedule", {
+    p_user_id: "sebastian",
+    p_day_plan_id: dayPlanId,
+    p_expected_check_in_completed_at: expectedCheckInCompletedAt,
+    p_blocks: blocks.map((block) => ({
+      source_type: block.sourceType,
+      source_id: block.sourceId,
+      title: block.title,
+      responsibility_area: block.responsibilityArea,
+      start_time: block.startTime,
+      end_time: block.endTime,
+      status: block.status,
+      order_index: block.orderIndex,
+    })),
+  });
 
-  if (deleteError) {
-    if (isMissingTableError(deleteError)) throw new MissingScheduleBlocksTableError();
-    throw deleteError;
+  if (error) {
+    throwIfDailyCheckInMigrationMissing(error);
+    if (error.code === "P0001" && error.message?.includes("ECHO_CHECK_IN_CHANGED")) {
+      throw new CheckInChangedDuringGenerationError();
+    }
+    if (isMissingTableError(error)) throw new MissingScheduleBlocksTableError();
+    throw error;
   }
 
-  if (blocks.length === 0) {
-    return [];
-  }
-
-  const { data, error: insertError } = await supabase
-    .from("schedule_blocks")
-    .insert(
-      blocks.map((block) => ({
-        day_plan_id: dayPlanId,
-        source_type: block.sourceType,
-        source_id: block.sourceId,
-        title: block.title,
-        responsibility_area: block.responsibilityArea,
-        start_time: block.startTime,
-        end_time: block.endTime,
-        status: block.status,
-        order_index: block.orderIndex,
-      })),
-    )
-    .select("*")
-    .order("order_index", { ascending: true });
-
-  if (insertError) {
-    if (isMissingTableError(insertError)) throw new MissingScheduleBlocksTableError();
-    throw insertError;
-  }
-
-  return (data ?? []).map(toScheduleBlock);
+  const result = data as PersistGeneratedScheduleRow;
+  return {
+    dayPlan: mapDayPlanRow(result.day_plan),
+    scheduleBlocks: (result.schedule_blocks ?? []).map(toScheduleBlock),
+  };
 }
 
 export async function updateScheduleBlockStatus(

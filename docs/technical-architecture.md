@@ -101,3 +101,14 @@ Echo may only use:
 - information from this dedicated Echo project
 
 Echo must never use unrelated conversations or information belonging to other account users.
+
+## Daily Planning Pipeline
+
+Daily planning keeps reasoning inputs separate from hard scheduling rules:
+
+1. A daily check-in stores energy, stress, sleep quality, whether the user has eaten, optional check-in notes, and the user's available work window on the existing `day_plans` record.
+2. A pure deterministic PlanningContext layer converts the structured check-in into effective energy, a capacity tier, a task-minute budget, and a break policy.
+3. The deterministic scheduler ranks tasks using effective energy, preserves commitments, enforces the task-minute budget, performs all time arithmetic, and surfaces work that does not fit as unscheduled.
+4. The service persists schedule blocks and marks the day plan generated.
+
+Free-text `checkInNotes` is carried as context for possible future AI reasoning but never changes deterministic capacity or creates hard constraints. AI may eventually explain or discuss a plan, but it must not replace capacity rules, commitment handling, break policy, or scheduling arithmetic.

@@ -2,10 +2,58 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   calendarDayDifference,
+  fromUserDateTimeLocalString,
   isSameUserDay,
+  parseTimestampWithExplicitOffset,
   startOfUserDay,
   toUserDateString,
+  toUserDateTimeLocalString,
 } from "./timezone.ts";
+
+test("datetime-local formatting always uses America/Chicago", () => {
+  assert.equal(
+    toUserDateTimeLocalString(new Date("2026-07-23T14:30:00Z")),
+    "2026-07-23T09:30",
+  );
+  assert.equal(
+    toUserDateTimeLocalString(new Date("2026-01-15T15:30:00Z")),
+    "2026-01-15T09:30",
+  );
+});
+
+test("Chicago datetime-local values convert to the correct summer and winter instants", () => {
+  assert.equal(
+    fromUserDateTimeLocalString("2026-07-23T09:30")?.toISOString(),
+    "2026-07-23T14:30:00.000Z",
+  );
+  assert.equal(
+    fromUserDateTimeLocalString("2026-01-15T09:30")?.toISOString(),
+    "2026-01-15T15:30:00.000Z",
+  );
+});
+
+test("Chicago conversion handles midnight without drifting to the UTC calendar day", () => {
+  assert.equal(
+    fromUserDateTimeLocalString("2026-08-02T00:00")?.toISOString(),
+    "2026-08-02T05:00:00.000Z",
+  );
+});
+
+test("Chicago conversion rejects a nonexistent spring-forward wall-clock time", () => {
+  assert.equal(fromUserDateTimeLocalString("2026-03-08T02:30"), null);
+});
+
+test("server timestamp parsing requires an explicit offset", () => {
+  assert.equal(parseTimestampWithExplicitOffset("2026-08-02T09:00:00"), null);
+  assert.equal(
+    parseTimestampWithExplicitOffset("2026-08-02T09:00:00-05:00")?.toISOString(),
+    "2026-08-02T14:00:00.000Z",
+  );
+  assert.equal(
+    parseTimestampWithExplicitOffset("2026-08-02T14:00:00Z")?.toISOString(),
+    "2026-08-02T14:00:00.000Z",
+  );
+});
 
 test("toUserDateString converts to the Chicago calendar day, not the UTC day", () => {
   // 03:00 UTC on July 23 is 22:00 CDT on July 22 — a different calendar day

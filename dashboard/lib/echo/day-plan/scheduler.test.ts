@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { generateSchedule, repackFrom, selectNextStep } from "./scheduler.ts";
 import type { Task } from "../types/task.ts";
 import type { Commitment, ScheduleBlock } from "../types/day-plan.ts";
+import type { PlanningContext } from "../types/planning-context.ts";
 
 let taskCounter = 0;
 function fakeTask(overrides: Partial<Task> = {}): Task {
@@ -63,6 +64,26 @@ function fakeBlock(overrides: Partial<ScheduleBlock> = {}): ScheduleBlock {
 
 const NOW = new Date("2026-07-23T13:00:00Z"); // 08:00 CDT
 
+function fakePlanningContext(overrides: Partial<PlanningContext> = {}): PlanningContext {
+  return {
+    planDate: "2026-07-23",
+    availableFrom: "2026-07-23T13:00:00Z",
+    endOfWorkTime: "2026-07-23T20:00:00Z",
+    energy: 6,
+    stress: 3,
+    sleepQuality: "good",
+    hasEaten: true,
+    checkInNotes: null,
+    checkInCompletedAt: "2026-07-23T12:55:00Z",
+    effectiveEnergy: 6,
+    capacityTier: "steady",
+    maxScheduledTaskMinutes: 300,
+    breakAfterMinutes: 90,
+    breakDurationMinutes: 10,
+    ...overrides,
+  };
+}
+
 // ---- generateSchedule ----
 
 test("generateSchedule carves out fixed commitments and never overlaps them", () => {
@@ -77,7 +98,7 @@ test("generateSchedule carves out fixed commitments and never overlaps them", ()
     commitments: [commitment],
     availableFrom: new Date("2026-07-23T13:00:00Z"),
     endOfWorkTime: new Date("2026-07-23T18:00:00Z"),
-    currentEnergy: 6,
+    planningContext: fakePlanningContext(),
     now: NOW,
   });
 
@@ -115,13 +136,39 @@ test("generateSchedule places higher-scored (more urgent) tasks earlier", () => 
     commitments: [],
     availableFrom: new Date("2026-07-23T13:00:00Z"),
     endOfWorkTime: new Date("2026-07-23T18:00:00Z"),
-    currentEnergy: 6,
+    planningContext: fakePlanningContext(),
     now: NOW,
   });
 
   const urgentBlock = result.blocks.find((b) => b.sourceId === urgent.id)!;
   const nonUrgentBlock = result.blocks.find((b) => b.sourceId === nonUrgent.id)!;
   assert.ok(new Date(urgentBlock.startTime) < new Date(nonUrgentBlock.startTime));
+});
+
+test("generateSchedule uses effectiveEnergy, not raw energy, for proven task scoring", () => {
+  const highEnergyTask = fakeTask({
+    title: "High-energy task",
+    energyRequired: "high",
+    priority: "medium",
+  });
+  const lowEnergyTask = fakeTask({
+    title: "Low-energy task",
+    energyRequired: "low",
+    priority: "medium",
+  });
+
+  const result = generateSchedule({
+    tasks: [highEnergyTask, lowEnergyTask],
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T18:00:00Z"),
+    planningContext: fakePlanningContext({ energy: 10, effectiveEnergy: 2 }),
+    now: NOW,
+  });
+
+  const highEnergyBlock = result.blocks.find((block) => block.sourceId === highEnergyTask.id)!;
+  const lowEnergyBlock = result.blocks.find((block) => block.sourceId === lowEnergyTask.id)!;
+  assert.ok(new Date(lowEnergyBlock.startTime) < new Date(highEnergyBlock.startTime));
 });
 
 test("generateSchedule inserts a break after roughly 90 continuous minutes of work", () => {
@@ -135,7 +182,7 @@ test("generateSchedule inserts a break after roughly 90 continuous minutes of wo
     commitments: [],
     availableFrom: new Date("2026-07-23T13:00:00Z"),
     endOfWorkTime: new Date("2026-07-23T18:00:00Z"),
-    currentEnergy: 6,
+    planningContext: fakePlanningContext(),
     now: NOW,
   });
 
@@ -157,7 +204,7 @@ test("generateSchedule prefers the largest interval for deep-work tasks", () => 
     commitments: [commitment],
     availableFrom: new Date("2026-07-23T14:00:00Z"), // 09:00 CDT
     endOfWorkTime: new Date("2026-07-23T20:00:00Z"), // 15:00 CDT
-    currentEnergy: 6,
+    planningContext: fakePlanningContext(),
     now: NOW,
   });
 
@@ -175,7 +222,7 @@ test("generateSchedule surfaces tasks that don't fit as unscheduled, never drops
     commitments: [],
     availableFrom: new Date("2026-07-23T13:00:00Z"),
     endOfWorkTime: new Date("2026-07-23T14:00:00Z"), // 1-hour window
-    currentEnergy: 6,
+    planningContext: fakePlanningContext(),
     now: NOW,
   });
 
@@ -196,7 +243,7 @@ test("generateSchedule is deterministic: identical input always produces an iden
     commitments,
     availableFrom: new Date("2026-07-23T13:00:00Z"),
     endOfWorkTime: new Date("2026-07-23T20:00:00Z"),
-    currentEnergy: 6,
+    planningContext: fakePlanningContext(),
     now: NOW,
   };
 
@@ -204,6 +251,201 @@ test("generateSchedule is deterministic: identical input always produces an iden
   const second = generateSchedule(input);
 
   assert.deepEqual(first, second);
+});
+
+test("generateSchedule enforces maxScheduledTaskMinutes as a hard task-work budget", () => {
+  const tasks = [
+    fakeTask({ title: "First", estimatedMinutes: 60, priority: "high" }),
+    fakeTask({ title: "Second", estimatedMinutes: 60, priority: "medium" }),
+    fakeTask({ title: "Third", estimatedMinutes: 30, priority: "low" }),
+  ];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T20:00:00Z"),
+    planningContext: fakePlanningContext({ maxScheduledTaskMinutes: 90 }),
+    now: NOW,
+  });
+
+  const scheduledTaskMinutes = result.blocks
+    .filter((block) => block.sourceType === "task")
+    .reduce(
+      (total, block) =>
+        total +
+        (new Date(block.endTime).getTime() - new Date(block.startTime).getTime()) / 60_000,
+      0,
+    );
+  assert.equal(scheduledTaskMinutes, 90);
+  assert.equal(result.unscheduled.length, 1);
+  assert.equal(result.unscheduled[0].title, "Second");
+});
+
+test("generateSchedule never removes commitments when task capacity is exhausted", () => {
+  const commitment = fakeCommitment({
+    title: "Class",
+    startTime: "2026-07-23T15:00:00Z",
+    endTime: "2026-07-23T16:00:00Z",
+  });
+  const tasks = [
+    fakeTask({ estimatedMinutes: 90, priority: "high" }),
+    fakeTask({ estimatedMinutes: 30, priority: "low" }),
+  ];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [commitment],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T20:00:00Z"),
+    planningContext: fakePlanningContext({ maxScheduledTaskMinutes: 90 }),
+    now: NOW,
+  });
+
+  const commitmentBlock = result.blocks.find((block) => block.sourceType === "commitment");
+  assert.equal(commitmentBlock?.sourceId, commitment.id);
+  assert.equal(commitmentBlock?.title, "Class");
+  assert.equal(result.unscheduled.length, 1);
+});
+
+test("generateSchedule uses the planning context break policy", () => {
+  const tasks = [
+    fakeTask({ title: "A", estimatedMinutes: 30, priority: "high" }),
+    fakeTask({ title: "B", estimatedMinutes: 30, priority: "high" }),
+  ];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T16:00:00Z"),
+    planningContext: fakePlanningContext({
+      maxScheduledTaskMinutes: 90,
+      breakAfterMinutes: 30,
+      breakDurationMinutes: 15,
+    }),
+    now: NOW,
+  });
+
+  const breakBlock = result.blocks.find((block) => block.sourceType === "break");
+  assert.ok(breakBlock);
+  assert.equal(
+    (new Date(breakBlock.endTime).getTime() - new Date(breakBlock.startTime).getTime()) / 60_000,
+    15,
+  );
+});
+
+test("a required break is not skipped when an interval fits only the task", () => {
+  const first = fakeTask({ title: "First", estimatedMinutes: 30, priority: "high" });
+  const second = fakeTask({ title: "Second", estimatedMinutes: 30, priority: "medium" });
+
+  const result = generateSchedule({
+    tasks: [first, second],
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T14:00:00Z"),
+    planningContext: fakePlanningContext({
+      breakAfterMinutes: 30,
+      breakDurationMinutes: 15,
+    }),
+    now: NOW,
+  });
+
+  assert.equal(result.blocks.some((block) => block.sourceId === first.id), true);
+  assert.equal(result.blocks.some((block) => block.sourceId === second.id), false);
+  assert.deepEqual(result.unscheduled.map((task) => task.id), [second.id]);
+});
+
+test("scheduler considers a later interval that can fit the required break and task", () => {
+  const commitment = fakeCommitment({
+    startTime: "2026-07-23T14:00:00Z",
+    endTime: "2026-07-23T14:15:00Z",
+  });
+  const first = fakeTask({
+    title: "First interval work",
+    estimatedMinutes: 30,
+    priority: "high",
+    dueAt: "2026-07-23T12:00:00Z",
+  });
+  const second = fakeTask({
+    title: "Later interval work",
+    estimatedMinutes: 30,
+    priority: "high",
+    deepWork: true,
+  });
+  const third = fakeTask({ title: "Needs break", estimatedMinutes: 30, priority: "low" });
+
+  const result = generateSchedule({
+    tasks: [first, second, third],
+    commitments: [commitment],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T15:45:00Z"),
+    planningContext: fakePlanningContext({
+      breakAfterMinutes: 30,
+      breakDurationMinutes: 15,
+    }),
+    now: NOW,
+  });
+
+  const thirdBlock = result.blocks.find((block) => block.sourceId === third.id);
+  const breakBlock = result.blocks.find(
+    (block) =>
+      block.sourceType === "break" && block.startTime === "2026-07-23T14:45:00.000Z",
+  );
+  assert.ok(breakBlock);
+  assert.equal(thirdBlock?.startTime, "2026-07-23T15:00:00.000Z");
+});
+
+test("a task remains unscheduled when no interval fits its required break", () => {
+  const tasks = [
+    fakeTask({ title: "First", estimatedMinutes: 30, priority: "high" }),
+    fakeTask({ title: "Cannot bypass break", estimatedMinutes: 30, priority: "low" }),
+  ];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T14:00:00Z"),
+    planningContext: fakePlanningContext({
+      breakAfterMinutes: 30,
+      breakDurationMinutes: 15,
+    }),
+    now: NOW,
+  });
+
+  assert.deepEqual(result.unscheduled.map((task) => task.title), ["Cannot bypass break"]);
+  assert.equal(result.blocks.filter((block) => block.sourceType === "break").length, 0);
+});
+
+test("a commitment resets continuous-work tracking", () => {
+  const commitment = fakeCommitment({
+    startTime: "2026-07-23T13:30:00Z",
+    endTime: "2026-07-23T13:45:00Z",
+  });
+  const tasks = [
+    fakeTask({ title: "Before commitment", estimatedMinutes: 30, priority: "high" }),
+    fakeTask({ title: "After commitment", estimatedMinutes: 30, priority: "low" }),
+  ];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [commitment],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T14:15:00Z"),
+    planningContext: fakePlanningContext({
+      breakAfterMinutes: 30,
+      breakDurationMinutes: 15,
+    }),
+    now: NOW,
+  });
+
+  assert.equal(result.blocks.filter((block) => block.sourceType === "task").length, 2);
+  assert.equal(result.blocks.filter((block) => block.sourceType === "break").length, 0);
+  assert.equal(
+    result.blocks.find((block) => block.title === "After commitment")?.startTime,
+    "2026-07-23T13:45:00.000Z",
+  );
 });
 
 // ---- repackFrom ----

@@ -9,3 +9,4 @@ export * from "@/lib/echo/types/creative-work";
 export * from "@/lib/echo/types/responsibility-area";
 export * from "@/lib/echo/types/task";
 export * from "@/lib/echo/types/day-plan";
+export * from "@/lib/echo/types/planning-context";

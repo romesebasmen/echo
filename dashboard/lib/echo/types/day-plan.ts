@@ -1,4 +1,5 @@
 import type { ResponsibilityArea } from "@/lib/echo/types/responsibility-area";
+import type { SleepQuality } from "@/lib/echo/types/planning-context";
 
 export type ScheduleBlockSourceType = "task" | "commitment" | "break";
 export type ScheduleBlockStatus = "scheduled" | "completed" | "skipped";
@@ -42,6 +43,11 @@ export interface DayPlan {
   // is created mid-day rather than always assuming a fresh morning.
   availableFrom: string;
   energy: number;
+  stress: number | null;
+  sleepQuality: SleepQuality | null;
+  hasEaten: boolean | null;
+  checkInNotes: string | null;
+  checkInCompletedAt: string | null;
   endOfWorkTime: string;
   status: DayPlanStatus;
   createdAt: string;

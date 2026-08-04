@@ -9,7 +9,13 @@
 // production callers.
 import { generateSchedule } from "./scheduler.ts";
 import type { DraftScheduleBlock } from "./scheduler.ts";
-import type { Commitment, DayPlan, DayPlanStatus, ScheduleBlock } from "../types/day-plan.ts";
+import { missingCheckInFields } from "./check-in.ts";
+import {
+  createPlanningContext,
+  InvalidPlanningContextError,
+} from "./planning-context.ts";
+import type { Commitment, DayPlan, ScheduleBlock } from "../types/day-plan.ts";
+import type { PlanningContext } from "../types/planning-context.ts";
 import type { Task, TaskStatus } from "../types/task.ts";
 
 export class DayPlanNotFoundError extends Error {
@@ -25,6 +31,23 @@ export class InvalidAvailableTimeRangeError extends Error {
       `availableFrom (${availableFrom}) must be earlier than endOfWorkTime (${endOfWorkTime}).`,
     );
     this.name = "InvalidAvailableTimeRangeError";
+  }
+}
+
+export class IncompleteCheckInError extends Error {
+  readonly missingFields: string[];
+
+  constructor(planDate: string, missingFields: string[]) {
+    super(`The daily check-in for ${planDate} is incomplete: ${missingFields.join(", ")}.`);
+    this.name = "IncompleteCheckInError";
+    this.missingFields = missingFields;
+  }
+}
+
+export class InvalidCheckInStateError extends Error {
+  constructor(reason: string) {
+    super(`The daily check-in is invalid: ${reason}`);
+    this.name = "InvalidCheckInStateError";
   }
 }
 
@@ -55,15 +78,16 @@ export interface GenerateAndPersistDayPlanDeps {
   getDayPlanForDate: (planDate: string) => Promise<DayPlan | null>;
   listTasks: (options: { status?: TaskStatus }) => Promise<Task[]>;
   listCommitments: (dayPlanId: string) => Promise<Commitment[]>;
-  replaceScheduleBlocks: (
+  persistGeneratedSchedule: (
     dayPlanId: string,
+    expectedCheckInCompletedAt: string,
     blocks: DraftScheduleBlock[],
-  ) => Promise<ScheduleBlock[]>;
-  updateDayPlanStatus: (id: string, status: DayPlanStatus) => Promise<DayPlan>;
+  ) => Promise<{ dayPlan: DayPlan; scheduleBlocks: ScheduleBlock[] }>;
 }
 
 export interface GenerateAndPersistDayPlanResult {
   dayPlan: DayPlan;
+  planningContext: PlanningContext;
   scheduleBlocks: ScheduleBlock[];
   // Open tasks that didn't fit today — surfaced, never silently dropped.
   unscheduled: Task[];
@@ -84,6 +108,12 @@ export async function generateAndPersistDayPlan(
     throw new DayPlanNotFoundError(planDate);
   }
 
+  const missingFields = missingCheckInFields(dayPlan);
+  if (missingFields.length > 0) {
+    throw new IncompleteCheckInError(planDate, missingFields);
+  }
+  const { stress, sleepQuality, hasEaten, checkInCompletedAt } = dayPlan;
+
   const availableFrom = new Date(dayPlan.availableFrom);
   const endOfWorkTime = new Date(dayPlan.endOfWorkTime);
   if (availableFrom.getTime() >= endOfWorkTime.getTime()) {
@@ -95,6 +125,26 @@ export async function generateAndPersistDayPlan(
     deps.listCommitments(dayPlan.id),
   ]);
 
+  let planningContext: PlanningContext;
+  try {
+    planningContext = createPlanningContext({
+      planDate: dayPlan.planDate,
+      availableFrom: dayPlan.availableFrom,
+      endOfWorkTime: dayPlan.endOfWorkTime,
+      energy: dayPlan.energy,
+      stress: stress!,
+      sleepQuality: sleepQuality!,
+      hasEaten: hasEaten!,
+      checkInNotes: dayPlan.checkInNotes,
+      checkInCompletedAt: checkInCompletedAt!,
+    });
+  } catch (error) {
+    if (error instanceof InvalidPlanningContextError) {
+      throw new InvalidCheckInStateError(error.message);
+    }
+    throw error;
+  }
+
   let generated: { blocks: DraftScheduleBlock[]; unscheduled: Task[] };
   try {
     generated = generateSchedule({
@@ -102,25 +152,28 @@ export async function generateAndPersistDayPlan(
       commitments,
       availableFrom,
       endOfWorkTime,
-      currentEnergy: dayPlan.energy,
+      planningContext,
       now,
     });
   } catch (error) {
     throw new ScheduleGenerationError(error instanceof Error ? error.message : String(error));
   }
 
-  const persistedBlocks = await deps.replaceScheduleBlocks(dayPlan.id, generated.blocks);
-  if (persistedBlocks.length !== generated.blocks.length) {
+  const persisted = await deps.persistGeneratedSchedule(
+    dayPlan.id,
+    checkInCompletedAt!,
+    generated.blocks,
+  );
+  if (persisted.scheduleBlocks.length !== generated.blocks.length) {
     throw new SchedulePersistenceError(
-      `expected ${generated.blocks.length} block(s) to be persisted, but ${persistedBlocks.length} were returned`,
+      `expected ${generated.blocks.length} block(s) to be persisted, but ${persisted.scheduleBlocks.length} were returned`,
     );
   }
 
-  const updatedDayPlan = await deps.updateDayPlanStatus(dayPlan.id, "generated");
-
   return {
-    dayPlan: updatedDayPlan,
-    scheduleBlocks: persistedBlocks,
+    dayPlan: persisted.dayPlan,
+    planningContext,
+    scheduleBlocks: persisted.scheduleBlocks,
     unscheduled: generated.unscheduled,
   };
 }
