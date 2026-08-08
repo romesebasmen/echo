@@ -7,9 +7,10 @@ export default function ChatPage() {
       <div className="flex flex-col gap-2">
         <Link
           href="/"
-          className="text-sm text-muted transition-colors hover:text-accent"
+          aria-label="Return to Echo home"
+          className="fixed left-4 top-4 z-40 inline-flex items-center rounded-full border border-border bg-background/90 px-3 py-1.5 text-sm font-medium text-muted shadow-sm backdrop-blur transition-colors hover:border-accent hover:text-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent sm:left-6 sm:top-6"
         >
-          ← Back
+          ← Home
         </Link>
         <h1 className="text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
           Talk to Echo
