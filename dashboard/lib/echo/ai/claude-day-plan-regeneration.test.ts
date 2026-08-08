@@ -2,7 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildDayPlanRegenerationOutputSchema,
+  createAnthropicDayPlanClient,
   createClaudeDayPlanRecommendationProvider,
+  DAY_PLAN_REGENERATION_MAX_RETRIES,
   DAY_PLAN_REGENERATION_MODEL,
   type ClaudeDayPlanMessageCaller,
 } from "./claude-day-plan-regeneration.ts";
@@ -83,6 +85,13 @@ function validResponseText(): string {
     ],
   });
 }
+
+test("production Anthropic client disables SDK retries", () => {
+  const client = createAnthropicDayPlanClient("test-api-key");
+
+  assert.equal(DAY_PLAN_REGENERATION_MAX_RETRIES, 0);
+  assert.equal(client.maxRetries, 0);
+});
 
 test("system prompt establishes every deterministic scheduling boundary", () => {
   const prompt = DAY_PLAN_REGENERATION_SYSTEM_PROMPT.toLowerCase();

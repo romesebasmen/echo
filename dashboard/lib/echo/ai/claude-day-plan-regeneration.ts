@@ -23,6 +23,7 @@ import {
 // network request and does not read ANTHROPIC_API_KEY.
 
 export const DAY_PLAN_REGENERATION_MODEL = "claude-opus-4-8";
+export const DAY_PLAN_REGENERATION_MAX_RETRIES = 0;
 const MAX_OUTPUT_TOKENS = 2_048;
 
 interface ClaudeResponseBlock {
@@ -40,6 +41,13 @@ export type ClaudeDayPlanMessageCaller = (
 
 let cachedClient: Anthropic | null = null;
 
+export function createAnthropicDayPlanClient(apiKey: string): Anthropic {
+  return new Anthropic({
+    apiKey,
+    maxRetries: DAY_PLAN_REGENERATION_MAX_RETRIES,
+  });
+}
+
 function getClient(): Anthropic {
   if (cachedClient) return cachedClient;
 
@@ -48,7 +56,7 @@ function getClient(): Anthropic {
     throw new Error("Missing ANTHROPIC_API_KEY environment variable.");
   }
 
-  cachedClient = new Anthropic({ apiKey });
+  cachedClient = createAnthropicDayPlanClient(apiKey);
   return cachedClient;
 }
 
