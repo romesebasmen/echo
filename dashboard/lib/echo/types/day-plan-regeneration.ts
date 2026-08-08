@@ -34,3 +34,61 @@ export type ValidatedDayPlanRegenerationProposal = DayPlanRegenerationProposal &
 export interface TaskSchedulingGuidance {
   readonly taskDispositions: ReadonlyMap<string, TaskRecommendationDisposition>;
 }
+
+export type DayPlanRecommendationTaskInput = Pick<
+  Task,
+  | "id"
+  | "title"
+  | "description"
+  | "responsibilityArea"
+  | "dueAt"
+  | "estimatedMinutes"
+  | "energyRequired"
+  | "priority"
+  | "deepWork"
+  | "createdAt"
+  | "updatedAt"
+>;
+
+export type DayPlanRecommendationCommitmentInput = Pick<
+  Commitment,
+  "id" | "title" | "startTime" | "endTime" | "responsibilityArea"
+>;
+
+export interface DayPlanRecommendationInput {
+  readonly planningContext: PlanningContext;
+  readonly tasks: readonly DayPlanRecommendationTaskInput[];
+  readonly commitments: readonly DayPlanRecommendationCommitmentInput[];
+}
+
+export interface DayPlanRegenerationTaskSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly responsibilityArea: ResponsibilityArea;
+  readonly estimatedMinutes: number | null;
+}
+
+export interface DayPlanRegenerationProposalEnvelope {
+  readonly schemaVersion: typeof DAY_PLAN_REGENERATION_SCHEMA_VERSION;
+  readonly recommendation: ValidatedDayPlanRegenerationProposal;
+  readonly inputFingerprint: string;
+  readonly expectedCheckInCompletedAt: string;
+  readonly generatedAt: string;
+  // Server-sourced display data. Apply never treats these summaries as input.
+  readonly taskSummaries: readonly DayPlanRegenerationTaskSummary[];
+}
+
+// Runtime-untrusted application input. The service revalidates recommendation
+// and reloads all authoritative task, commitment, check-in, and capacity data.
+export interface ApplyDayPlanRegenerationRequest {
+  readonly schemaVersion: number;
+  readonly recommendation: unknown;
+  readonly inputFingerprint: string;
+  readonly expectedCheckInCompletedAt: string;
+}
+import type { Commitment } from "@/lib/echo/types/day-plan";
+import type { PlanningContext } from "@/lib/echo/types/planning-context";
+import type { ResponsibilityArea } from "@/lib/echo/types/responsibility-area";
+import type { Task } from "@/lib/echo/types/task";
+
+export const DAY_PLAN_REGENERATION_SCHEMA_VERSION = 1 as const;

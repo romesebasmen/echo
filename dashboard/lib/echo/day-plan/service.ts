@@ -74,15 +74,27 @@ export class SchedulePersistenceError extends Error {
   }
 }
 
-export interface GenerateAndPersistDayPlanDeps {
+export interface LoadDayPlanPlanningInputsDeps {
   getDayPlanForDate: (planDate: string) => Promise<DayPlan | null>;
   listTasks: (options: { status?: TaskStatus }) => Promise<Task[]>;
   listCommitments: (dayPlanId: string) => Promise<Commitment[]>;
+}
+
+export interface GenerateAndPersistDayPlanDeps extends LoadDayPlanPlanningInputsDeps {
   persistGeneratedSchedule: (
     dayPlanId: string,
     expectedCheckInCompletedAt: string,
     blocks: DraftScheduleBlock[],
   ) => Promise<{ dayPlan: DayPlan; scheduleBlocks: ScheduleBlock[] }>;
+}
+
+export interface LoadedDayPlanPlanningInputs {
+  dayPlan: DayPlan;
+  planningContext: PlanningContext;
+  openTasks: Task[];
+  commitments: Commitment[];
+  availableFrom: Date;
+  endOfWorkTime: Date;
 }
 
 export interface GenerateAndPersistDayPlanResult {
@@ -93,16 +105,13 @@ export interface GenerateAndPersistDayPlanResult {
   unscheduled: Task[];
 }
 
-// Loads a day plan and its inputs, runs the existing deterministic
-// scheduler, persists the result, and marks the plan generated. This
-// function decides nothing about priority or timing itself — all of that
-// stays inside scheduler.ts. It only sequences repository reads/writes
-// around a single call to the existing scheduling function.
-export async function generateAndPersistDayPlan(
+// Shared read-only boundary for deterministic generation and reviewed
+// regeneration. It validates the saved check-in before exposing any planning
+// inputs, so both flows derive exactly the same trusted PlanningContext.
+export async function loadDayPlanPlanningInputs(
   planDate: string,
-  deps: GenerateAndPersistDayPlanDeps,
-  now: Date = new Date(),
-): Promise<GenerateAndPersistDayPlanResult> {
+  deps: LoadDayPlanPlanningInputsDeps,
+): Promise<LoadedDayPlanPlanningInputs> {
   const dayPlan = await deps.getDayPlanForDate(planDate);
   if (!dayPlan) {
     throw new DayPlanNotFoundError(planDate);
@@ -119,11 +128,6 @@ export async function generateAndPersistDayPlan(
   if (availableFrom.getTime() >= endOfWorkTime.getTime()) {
     throw new InvalidAvailableTimeRangeError(dayPlan.availableFrom, dayPlan.endOfWorkTime);
   }
-
-  const [openTasks, commitments] = await Promise.all([
-    deps.listTasks({ status: "open" }),
-    deps.listCommitments(dayPlan.id),
-  ]);
 
   let planningContext: PlanningContext;
   try {
@@ -145,6 +149,41 @@ export async function generateAndPersistDayPlan(
     throw error;
   }
 
+  const [openTasks, commitments] = await Promise.all([
+    deps.listTasks({ status: "open" }),
+    deps.listCommitments(dayPlan.id),
+  ]);
+
+  return {
+    dayPlan,
+    planningContext,
+    openTasks,
+    commitments,
+    availableFrom,
+    endOfWorkTime,
+  };
+}
+
+// Loads a day plan and its inputs, runs the existing deterministic
+// scheduler, persists the result, and marks the plan generated. This
+// function decides nothing about priority or timing itself — all of that
+// stays inside scheduler.ts. It only sequences repository reads/writes
+// around a single call to the existing scheduling function.
+export async function generateAndPersistDayPlan(
+  planDate: string,
+  deps: GenerateAndPersistDayPlanDeps,
+  now: Date = new Date(),
+): Promise<GenerateAndPersistDayPlanResult> {
+  const {
+    dayPlan,
+    planningContext,
+    openTasks,
+    commitments,
+    availableFrom,
+    endOfWorkTime,
+  } = await loadDayPlanPlanningInputs(planDate, deps);
+  const checkInCompletedAt = dayPlan.checkInCompletedAt!;
+
   let generated: { blocks: DraftScheduleBlock[]; unscheduled: Task[] };
   try {
     generated = generateSchedule({
@@ -161,7 +200,7 @@ export async function generateAndPersistDayPlan(
 
   const persisted = await deps.persistGeneratedSchedule(
     dayPlan.id,
-    checkInCompletedAt!,
+    checkInCompletedAt,
     generated.blocks,
   );
   if (persisted.scheduleBlocks.length !== generated.blocks.length) {
