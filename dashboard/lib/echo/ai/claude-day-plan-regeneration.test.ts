@@ -1,11 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { APIConnectionError, APIError } from "@anthropic-ai/sdk";
 import {
   buildDayPlanRegenerationOutputSchema,
+  callAnthropicDayPlanModelWithDiagnostics,
   createAnthropicDayPlanClient,
   createClaudeDayPlanRecommendationProvider,
   DAY_PLAN_REGENERATION_MAX_RETRIES,
   DAY_PLAN_REGENERATION_MODEL,
+  MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH,
+  summarizeAnthropicError,
   type ClaudeDayPlanMessageCaller,
 } from "./claude-day-plan-regeneration.ts";
 import {
@@ -86,11 +90,111 @@ function validResponseText(): string {
   });
 }
 
+function apiError(
+  status: number,
+  type: "authentication_error" | "permission_error" | "invalid_request_error",
+  requestId = "req-safe-123",
+): APIError {
+  return APIError.generate(
+    status,
+    {
+      type: "error",
+      error: {
+        type,
+        message: "Response body details must not be logged.",
+      },
+    },
+    undefined,
+    new Headers({ "request-id": requestId }),
+  );
+}
+
 test("production Anthropic client disables SDK retries", () => {
   const client = createAnthropicDayPlanClient("test-api-key");
 
   assert.equal(DAY_PLAN_REGENERATION_MAX_RETRIES, 0);
   assert.equal(client.maxRetries, 0);
+});
+
+for (const scenario of [
+  {
+    name: "authentication",
+    status: 401,
+    type: "authentication_error",
+    sdkErrorName: "AuthenticationError",
+  },
+  {
+    name: "permission",
+    status: 403,
+    type: "permission_error",
+    sdkErrorName: "PermissionDeniedError",
+  },
+  {
+    name: "invalid request",
+    status: 400,
+    type: "invalid_request_error",
+    sdkErrorName: "BadRequestError",
+  },
+] as const) {
+  test(`sanitizes ${scenario.name} API errors without logging response bodies`, () => {
+    const summary = summarizeAnthropicError(
+      apiError(scenario.status, scenario.type),
+    );
+
+    assert.deepEqual(summary, {
+      sdkErrorName: scenario.sdkErrorName,
+      status: scenario.status,
+      type: scenario.type,
+      requestId: "req-safe-123",
+      safeMessage: `Anthropic API request failed (${scenario.type}).`,
+    });
+    assert.doesNotMatch(summary.safeMessage, /response body details/i);
+  });
+}
+
+test("sanitizes connection errors without an HTTP status and redacts API keys", () => {
+  const summary = summarizeAnthropicError(
+    new APIConnectionError({
+      message: "Connection failed using sk-ant-api03-super-secret-value",
+    }),
+  );
+
+  assert.deepEqual(summary, {
+    sdkErrorName: "APIConnectionError",
+    status: null,
+    type: "connection_error",
+    requestId: null,
+    safeMessage: "Connection failed using [REDACTED]",
+  });
+});
+
+test("truncates sanitized connection messages to the conservative limit", () => {
+  const summary = summarizeAnthropicError(
+    new APIConnectionError({ message: "x".repeat(1_000) }),
+  );
+
+  assert.equal(summary.safeMessage.length, MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH);
+  assert.match(summary.safeMessage, /…$/);
+});
+
+test("production diagnostic boundary logs once, makes one attempt, and rethrows", async () => {
+  const sdkError = apiError(401, "authentication_error", "req-one-attempt");
+  let calls = 0;
+  const summaries: ReturnType<typeof summarizeAnthropicError>[] = [];
+
+  await assert.rejects(
+    () => callAnthropicDayPlanModelWithDiagnostics(
+      async () => {
+        calls += 1;
+        throw sdkError;
+      },
+      (summary) => summaries.push(summary),
+    ),
+    (error: unknown) => error === sdkError,
+  );
+
+  assert.equal(calls, 1);
+  assert.deepEqual(summaries, [summarizeAnthropicError(sdkError)]);
 });
 
 test("system prompt establishes every deterministic scheduling boundary", () => {
