@@ -280,6 +280,25 @@ test("provider failure is typed and never schedules or persists", async () => {
   assert.equal(harness.calls.persistence.length, 0);
 });
 
+test("orchestration preserves typed errors already mapped by a provider adapter", async () => {
+  const typedErrors = [
+    new DayPlanRecommendationProviderUnavailableError(new Error("SDK failure")),
+    new InvalidDayPlanRecommendationProviderOutputError(
+      new InvalidDayPlanRegenerationProposalError("model output failed validation"),
+    ),
+  ];
+
+  for (const typedError of typedErrors) {
+    const harness = createHarness({ providerError: typedError });
+    await assert.rejects(
+      () => createProposal(harness),
+      (error: unknown) => error === typedError,
+    );
+    assert.equal(harness.calls.scheduler.length, 0);
+    assert.equal(harness.calls.persistence.length, 0);
+  }
+});
+
 test("proposal creation rejects an incomplete check-in before calling the provider", async () => {
   const harness = createHarness({ dayPlan: fakeDayPlan({ stress: null }) });
 

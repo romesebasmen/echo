@@ -156,6 +156,12 @@ export async function proposeDayPlanRegeneration(
   try {
     providerOutput = await deps.provider.recommend(providerInput);
   } catch (error) {
+    if (
+      error instanceof DayPlanRecommendationProviderUnavailableError ||
+      error instanceof InvalidDayPlanRecommendationProviderOutputError
+    ) {
+      throw error;
+    }
     throw new DayPlanRecommendationProviderUnavailableError(error);
   }
 
