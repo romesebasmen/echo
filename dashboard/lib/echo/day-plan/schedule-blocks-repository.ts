@@ -1,14 +1,15 @@
-import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
+import { getSupabaseServerClient } from "../supabase/server-client.ts";
 import type {
   DayPlan,
   ResponsibilityArea,
   ScheduleBlock,
   ScheduleBlockSourceType,
   ScheduleBlockStatus,
-} from "@/lib/echo/types";
-import type { DraftScheduleBlock } from "@/lib/echo/day-plan/scheduler";
-import { mapDayPlanRow, type DayPlanRow } from "@/lib/echo/day-plan/repository";
-import { throwIfDailyCheckInMigrationMissing } from "@/lib/echo/day-plan/migration-error";
+} from "../types/index.ts";
+import type { DraftScheduleBlock } from "./scheduler.ts";
+import { mapDayPlanRow, type DayPlanRow } from "./repository.ts";
+import { throwIfDailyCheckInMigrationMissing } from "./migration-error.ts";
+import type { ServiceRoleRpcCaller } from "../supabase/service-role-client.ts";
 
 // No USER_ID filtering here — schedule_blocks is scoped indirectly through
 // day_plan_id (day_plans.user_id), the same pattern commitments uses.
@@ -110,9 +111,24 @@ export async function persistGeneratedSchedule(
   expectedCheckInCompletedAt: string,
   blocks: DraftScheduleBlock[],
 ): Promise<PersistGeneratedScheduleResult> {
-  const supabase = getSupabaseServerClient();
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return persistGeneratedScheduleWithRpc(
+    dayPlanId,
+    expectedCheckInCompletedAt,
+    blocks,
+    callSupabaseServiceRoleRpc,
+  );
+}
 
-  const { data, error } = await supabase.rpc("replace_day_plan_schedule", {
+export async function persistGeneratedScheduleWithRpc(
+  dayPlanId: string,
+  expectedCheckInCompletedAt: string,
+  blocks: DraftScheduleBlock[],
+  callRpc: ServiceRoleRpcCaller,
+): Promise<PersistGeneratedScheduleResult> {
+  const { data, error } = await callRpc("replace_day_plan_schedule", {
     p_user_id: "sebastian",
     p_day_plan_id: dayPlanId,
     p_expected_check_in_completed_at: expectedCheckInCompletedAt,

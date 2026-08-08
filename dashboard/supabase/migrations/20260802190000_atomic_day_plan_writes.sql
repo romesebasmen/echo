@@ -19,6 +19,12 @@ declare
   v_plan public.day_plans%rowtype;
   v_changed boolean;
 begin
+  if p_user_id is distinct from 'sebastian' then
+    raise exception using
+      errcode = 'P0001',
+      message = 'ECHO_INVALID_USER';
+  end if;
+
   if p_energy is null or p_energy not between 1 and 10
     or p_stress is null or p_stress not between 1 and 10
     or p_sleep_quality is null or p_sleep_quality not in ('poor', 'okay', 'good')
@@ -120,6 +126,12 @@ declare
   v_plan public.day_plans%rowtype;
   v_blocks jsonb;
 begin
+  if p_user_id is distinct from 'sebastian' then
+    raise exception using
+      errcode = 'P0001',
+      message = 'ECHO_INVALID_USER';
+  end if;
+
   select *
   into v_plan
   from public.day_plans
@@ -190,14 +202,14 @@ $$;
 
 revoke all on function public.save_day_plan_check_in(
   text, date, timestamptz, integer, integer, text, boolean, text, timestamptz, timestamptz
-) from public;
+) from public, anon, authenticated;
 revoke all on function public.replace_day_plan_schedule(
   text, text, timestamptz, jsonb
-) from public;
+) from public, anon, authenticated;
 
 grant execute on function public.save_day_plan_check_in(
   text, date, timestamptz, integer, integer, text, boolean, text, timestamptz, timestamptz
-) to anon, authenticated;
+) to service_role;
 grant execute on function public.replace_day_plan_schedule(
   text, text, timestamptz, jsonb
-) to anon, authenticated;
+) to service_role;

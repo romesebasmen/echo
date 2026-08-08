@@ -63,3 +63,27 @@ test("database function rejects incomplete check-ins before writing completion s
   assert.match(body, /p_check_in_completed_at is null/);
   assert.match(body, /p_has_eaten is null/);
 });
+
+test("atomic RPCs reject caller-supplied identities other than sebastian", () => {
+  for (const name of ["save_day_plan_check_in", "replace_day_plan_schedule"]) {
+    const body = functionBody(name);
+    const identityCheck = body.indexOf("p_user_id is distinct from 'sebastian'");
+    const firstDataOperation =
+      name === "save_day_plan_check_in"
+        ? body.indexOf("pg_advisory_xact_lock")
+        : body.indexOf("select *", identityCheck);
+
+    assert.ok(identityCheck >= 0, `${name} must validate the fixed user identity`);
+    assert.ok(
+      firstDataOperation > identityCheck,
+      `${name} must validate identity before its first data operation`,
+    );
+    assert.match(body, /message = 'echo_invalid_user'/);
+  }
+});
+
+test("atomic RPC execution is restricted to service_role", () => {
+  assert.equal((sql.match(/from public, anon, authenticated;/g) ?? []).length, 2);
+  assert.equal((sql.match(/to service_role;/g) ?? []).length, 2);
+  assert.equal((sql.match(/to anon, authenticated;/g) ?? []).length, 0);
+});

@@ -1,4 +1,5 @@
 import { getSupabaseServerClient } from "../supabase/server-client.ts";
+import type { ServiceRoleRpcCaller } from "../supabase/service-role-client.ts";
 import type {
   Commitment,
   DayPlan,
@@ -131,9 +132,17 @@ export interface SaveDayPlanCheckInInput {
 // Upserts on (user_id, plan_date), same convention as daily_briefings — at
 // most one plan per user per day.
 export async function saveDayPlanCheckIn(input: SaveDayPlanCheckInInput): Promise<DayPlan> {
-  const supabase = getSupabaseServerClient();
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return saveDayPlanCheckInWithRpc(input, callSupabaseServiceRoleRpc);
+}
 
-  const { data, error } = await supabase.rpc("save_day_plan_check_in", {
+export async function saveDayPlanCheckInWithRpc(
+  input: SaveDayPlanCheckInInput,
+  callRpc: ServiceRoleRpcCaller,
+): Promise<DayPlan> {
+  const { data, error } = await callRpc("save_day_plan_check_in", {
     p_user_id: USER_ID,
     p_plan_date: input.planDate,
     p_available_from: input.availableFrom,
