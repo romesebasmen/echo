@@ -4,11 +4,20 @@ import { useState, type FormEvent } from "react";
 import { useDayPlan } from "@/lib/echo/day-plan/useDayPlan";
 import type { SaveDayPlanInput } from "@/lib/echo/day-plan/useDayPlan";
 import {
+  dayPlanRegenerationErrorMessage,
+  groupDayPlanRegenerationProposal,
+} from "@/lib/echo/day-plan/regeneration-presentation";
+import {
   fromUserDateTimeLocalString,
   toUserDateString,
   toUserDateTimeLocalString,
 } from "@/lib/echo/timezone";
-import type { DayPlan, PlanningContext, SleepQuality } from "@/lib/echo/types";
+import type {
+  DayPlan,
+  DayPlanRegenerationProposalEnvelope,
+  PlanningContext,
+  SleepQuality,
+} from "@/lib/echo/types";
 
 function defaultAvailability() {
   const now = new Date();
@@ -36,10 +45,12 @@ interface CheckInFormProps {
   isBusy: boolean;
   isSaving: boolean;
   isGenerating: boolean;
+  isRegenerating: boolean;
   scheduleBlockCount: number;
   unscheduledCount: number;
   onSave: ReturnType<typeof useDayPlan>["saveCheckIn"];
   onGenerate: ReturnType<typeof useDayPlan>["saveAndGeneratePlan"];
+  onRegenerate: ReturnType<typeof useDayPlan>["regenerateWithEcho"];
   onCheckInChange: ReturnType<typeof useDayPlan>["checkInInputChanged"];
 }
 
@@ -49,10 +60,12 @@ function CheckInForm({
   isBusy,
   isSaving,
   isGenerating,
+  isRegenerating,
   scheduleBlockCount,
   unscheduledCount,
   onSave,
   onGenerate,
+  onRegenerate,
   onCheckInChange,
 }: CheckInFormProps) {
   const defaults = defaultAvailability();
@@ -113,6 +126,11 @@ function CheckInForm({
   async function handleGenerate() {
     const input = currentInput();
     if (input) await onGenerate(input);
+  }
+
+  async function handleRegenerate() {
+    const input = currentInput();
+    if (input) await onRegenerate(input);
   }
 
   const rangeClassName = "h-1.5 w-full cursor-pointer accent-[var(--accent)]";
@@ -257,14 +275,29 @@ function CheckInForm({
         </button>
 
         <button
-            type="button"
-            disabled={isBusy}
-            onClick={handleGenerate}
-            className="text-sm font-medium text-accent transition-opacity hover:opacity-75 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isGenerating ? "Building your plan…" : "Build today’s plan →"}
+          type="button"
+          disabled={isBusy}
+          onClick={handleGenerate}
+          className="text-sm font-medium text-accent transition-opacity hover:opacity-75 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isGenerating ? "Building your plan…" : "Build today’s plan →"}
+        </button>
+
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={handleRegenerate}
+          className="rounded-md border border-accent px-4 py-2 text-sm font-medium text-accent transition-colors hover:bg-accent hover:text-background disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isRegenerating ? "Echo is thinking…" : "Regenerate with Echo"}
         </button>
       </div>
+
+      {isRegenerating && (
+        <p role="status" aria-live="polite" className="text-sm text-muted">
+          Echo is considering today’s capacity, tasks, and commitments…
+        </p>
+      )}
 
       {planningContext && (
         <p className="text-sm leading-6 text-muted">
@@ -287,8 +320,99 @@ function CheckInForm({
   );
 }
 
+interface RegenerationReviewProps {
+  proposal: DayPlanRegenerationProposalEnvelope;
+  planningContext: PlanningContext | null;
+  isBusy: boolean;
+  isApplying: boolean;
+  onApply: ReturnType<typeof useDayPlan>["applyRegeneration"];
+  onDismiss: ReturnType<typeof useDayPlan>["dismissRegenerationProposal"];
+}
+
+function RegenerationReview({
+  proposal,
+  planningContext,
+  isBusy,
+  isApplying,
+  onApply,
+  onDismiss,
+}: RegenerationReviewProps) {
+  const groups = groupDayPlanRegenerationProposal(proposal);
+
+  return (
+    <section
+      aria-labelledby="echo-recommendation-heading"
+      className="mt-8 rounded-xl border border-border bg-foreground/[0.025] p-5 sm:p-6"
+    >
+      <div className="flex flex-col gap-2">
+        <p className="text-xs uppercase tracking-[0.18em] text-accent">Echo’s recommendation</p>
+        <h3 id="echo-recommendation-heading" className="text-lg font-semibold text-foreground">
+          A considered shape for today
+        </h3>
+        <p className="max-w-2xl text-sm leading-6 text-muted">
+          {proposal.recommendation.explanation}
+        </p>
+        {planningContext && (
+          <p className="text-xs leading-5 text-muted">
+            Based on {planningContext.capacityTier} capacity and a task-work limit of{" "}
+            {minutesLabel(planningContext.maxScheduledTaskMinutes)}. Echo will leave exact timing,
+            commitments, and breaks to the deterministic planner.
+          </p>
+        )}
+      </div>
+
+      {groups.length > 0 && (
+        <div className="mt-6 grid gap-x-8 gap-y-5 sm:grid-cols-2">
+          {groups.map((group) => (
+            <div key={group.disposition} className="border-t border-border pt-4">
+              <h4 className="text-xs font-medium uppercase tracking-[0.14em] text-foreground">
+                {group.label}
+              </h4>
+              <ul className="mt-3 flex flex-col gap-2.5">
+                {group.tasks.map((task) => (
+                  <li key={task.id} className="flex items-baseline justify-between gap-4 text-sm">
+                    <span className="text-foreground">{task.title}</span>
+                    {task.estimatedMinutes !== null && (
+                      <span className="shrink-0 text-xs text-muted">
+                        {minutesLabel(task.estimatedMinutes)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="mt-7 flex flex-wrap items-center gap-4">
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={() => void onApply()}
+          className="rounded-md bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isApplying ? "Applying Echo’s recommendations…" : "Apply Echo’s recommendations"}
+        </button>
+        <button
+          type="button"
+          disabled={isBusy}
+          onClick={onDismiss}
+          className="text-sm text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Dismiss
+        </button>
+      </div>
+    </section>
+  );
+}
+
 export function DailyCheckInPanel() {
   const dayPlan = useDayPlan();
+  const visibleError =
+    dayPlan.clientError?.kind === "apply" && !dayPlan.regenerationProposal
+      ? null
+      : dayPlan.clientError;
 
   return (
     <section aria-labelledby="daily-check-in-heading" className="border-y border-border py-8">
@@ -302,7 +426,11 @@ export function DailyCheckInPanel() {
         </p>
       </div>
 
-      {dayPlan.error && <p className="mb-5 text-sm text-accent">{dayPlan.error}</p>}
+      {visibleError && (
+        <p role="alert" className="mb-5 text-sm leading-6 text-accent">
+          {dayPlanRegenerationErrorMessage(visibleError)}
+        </p>
+      )}
 
       {dayPlan.isLoading ? (
         <p className="text-sm text-muted">Loading today’s check-in…</p>
@@ -314,11 +442,24 @@ export function DailyCheckInPanel() {
           isBusy={dayPlan.isBusy}
           isSaving={dayPlan.isSaving}
           isGenerating={dayPlan.isGenerating}
+          isRegenerating={dayPlan.isRegenerating}
           scheduleBlockCount={dayPlan.scheduleBlocks.length}
           unscheduledCount={dayPlan.unscheduled.length}
           onSave={dayPlan.saveCheckIn}
           onGenerate={dayPlan.saveAndGeneratePlan}
+          onRegenerate={dayPlan.regenerateWithEcho}
           onCheckInChange={dayPlan.checkInInputChanged}
+        />
+      )}
+
+      {dayPlan.regenerationProposal && (
+        <RegenerationReview
+          proposal={dayPlan.regenerationProposal}
+          planningContext={dayPlan.regenerationPlanningContext}
+          isBusy={dayPlan.isBusy}
+          isApplying={dayPlan.isApplyingRegeneration}
+          onApply={dayPlan.applyRegeneration}
+          onDismiss={dayPlan.dismissRegenerationProposal}
         />
       )}
     </section>
