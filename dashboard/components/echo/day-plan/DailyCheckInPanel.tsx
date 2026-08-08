@@ -33,23 +33,27 @@ function minutesLabel(minutes: number): string {
 interface CheckInFormProps {
   initialDayPlan: DayPlan | null;
   planningContext: PlanningContext | null;
+  isBusy: boolean;
   isSaving: boolean;
   isGenerating: boolean;
   scheduleBlockCount: number;
   unscheduledCount: number;
   onSave: ReturnType<typeof useDayPlan>["saveCheckIn"];
   onGenerate: ReturnType<typeof useDayPlan>["saveAndGeneratePlan"];
+  onCheckInChange: ReturnType<typeof useDayPlan>["checkInInputChanged"];
 }
 
 function CheckInForm({
   initialDayPlan,
   planningContext,
+  isBusy,
   isSaving,
   isGenerating,
   scheduleBlockCount,
   unscheduledCount,
   onSave,
   onGenerate,
+  onCheckInChange,
 }: CheckInFormProps) {
   const defaults = defaultAvailability();
   const [energy, setEnergy] = useState(initialDayPlan?.energy ?? 6);
@@ -128,7 +132,10 @@ function CheckInForm({
             min={1}
             max={10}
             value={energy}
-            onChange={(event) => setEnergy(Number(event.target.value))}
+            onChange={(event) => {
+              onCheckInChange();
+              setEnergy(Number(event.target.value));
+            }}
             className={rangeClassName}
           />
         </label>
@@ -143,7 +150,10 @@ function CheckInForm({
             min={1}
             max={10}
             value={stress}
-            onChange={(event) => setStress(Number(event.target.value))}
+            onChange={(event) => {
+              onCheckInChange();
+              setStress(Number(event.target.value));
+            }}
             className={rangeClassName}
           />
         </label>
@@ -154,7 +164,10 @@ function CheckInForm({
           How did you sleep?
           <select
             value={sleepQuality}
-            onChange={(event) => setSleepQuality(event.target.value as SleepQuality)}
+            onChange={(event) => {
+              onCheckInChange();
+              setSleepQuality(event.target.value as SleepQuality);
+            }}
             className={inputClassName}
           >
             <option value="poor">Poorly</option>
@@ -171,7 +184,10 @@ function CheckInForm({
                 key={String(value)}
                 type="button"
                 aria-pressed={hasEaten === value}
-                onClick={() => setHasEaten(value)}
+                onClick={() => {
+                  if (hasEaten !== value) onCheckInChange();
+                  setHasEaten(value);
+                }}
                 className={`rounded-md border px-3 py-2 transition-colors ${
                   hasEaten === value
                     ? "border-accent text-foreground"
@@ -191,7 +207,10 @@ function CheckInForm({
           value={checkInNotes}
           maxLength={1000}
           rows={3}
-          onChange={(event) => setCheckInNotes(event.target.value)}
+          onChange={(event) => {
+            onCheckInChange();
+            setCheckInNotes(event.target.value);
+          }}
           placeholder="Optional — travel, a rough morning, something on your mind…"
           className={`${inputClassName} resize-y`}
         />
@@ -203,7 +222,10 @@ function CheckInForm({
           <input
             type="datetime-local"
             value={availableFrom}
-            onChange={(event) => setAvailableFrom(event.target.value)}
+            onChange={(event) => {
+              onCheckInChange();
+              setAvailableFrom(event.target.value);
+            }}
             className={inputClassName}
             required
           />
@@ -213,7 +235,10 @@ function CheckInForm({
           <input
             type="datetime-local"
             value={endOfWorkTime}
-            onChange={(event) => setEndOfWorkTime(event.target.value)}
+            onChange={(event) => {
+              onCheckInChange();
+              setEndOfWorkTime(event.target.value);
+            }}
             className={inputClassName}
             required
           />
@@ -225,7 +250,7 @@ function CheckInForm({
       <div className="flex flex-wrap items-center gap-4">
         <button
           type="submit"
-          disabled={isSaving || isGenerating}
+          disabled={isBusy}
           className="rounded-md border border-foreground px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving ? "Saving…" : "Save check-in"}
@@ -233,7 +258,7 @@ function CheckInForm({
 
         <button
             type="button"
-            disabled={isSaving || isGenerating}
+            disabled={isBusy}
             onClick={handleGenerate}
             className="text-sm font-medium text-accent transition-opacity hover:opacity-75 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -286,12 +311,14 @@ export function DailyCheckInPanel() {
           key={dayPlan.dayPlan?.updatedAt ?? "new-check-in"}
           initialDayPlan={dayPlan.dayPlan}
           planningContext={dayPlan.planningContext}
+          isBusy={dayPlan.isBusy}
           isSaving={dayPlan.isSaving}
           isGenerating={dayPlan.isGenerating}
           scheduleBlockCount={dayPlan.scheduleBlocks.length}
           unscheduledCount={dayPlan.unscheduled.length}
           onSave={dayPlan.saveCheckIn}
           onGenerate={dayPlan.saveAndGeneratePlan}
+          onCheckInChange={dayPlan.checkInInputChanged}
         />
       )}
     </section>
