@@ -248,6 +248,21 @@ test("proposal creation calls the provider exactly once and performs no scheduli
   assert.match(proposal.inputFingerprint, /^[a-f0-9]{64}$/);
 });
 
+test("proposal creation returns a server-generated empty proposal without calling the provider", async () => {
+  const harness = createHarness({ tasks: [] });
+
+  const proposal = await createProposal(harness);
+
+  assert.equal(harness.calls.provider.length, 0);
+  assert.deepEqual(proposal.recommendation.recommendations, []);
+  assert.equal(
+    proposal.recommendation.explanation,
+    "There are no open tasks to schedule today.",
+  );
+  assert.deepEqual(proposal.taskSummaries, []);
+  assert.match(proposal.inputFingerprint, /^[a-f0-9]{64}$/);
+});
+
 test("invalid provider output is typed and never schedules or persists", async () => {
   const harness = createHarness({
     providerOutput: {

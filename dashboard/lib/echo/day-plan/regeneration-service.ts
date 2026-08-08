@@ -20,6 +20,7 @@ import {
   type DayPlanRegenerationProposalEnvelope,
 } from "../types/day-plan-regeneration.ts";
 import type { DayPlan, ScheduleBlock } from "../types/day-plan.ts";
+import type { PlanningContext } from "../types/planning-context.ts";
 
 export interface DayPlanRecommendationProvider {
   recommend(input: DayPlanRecommendationInput): Promise<unknown>;
@@ -84,6 +85,11 @@ export interface ApplyDayPlanRegenerationDeps extends LoadDayPlanPlanningInputsD
   generateSchedule?: typeof generateSchedule;
 }
 
+export interface ProposeDayPlanRegenerationResult {
+  proposal: DayPlanRegenerationProposalEnvelope;
+  planningContext: PlanningContext;
+}
+
 function compareIds(a: { id: string }, b: { id: string }): number {
   if (a.id < b.id) return -1;
   if (a.id > b.id) return 1;
@@ -142,43 +148,71 @@ export async function proposeDayPlanRegeneration(
   deps: ProposeDayPlanRegenerationDeps,
   now: Date = new Date(),
 ): Promise<DayPlanRegenerationProposalEnvelope> {
+  const result = await proposeDayPlanRegenerationWithContext(
+    planDate,
+    expectedCheckInCompletedAt,
+    deps,
+    now,
+  );
+  return result.proposal;
+}
+
+export async function proposeDayPlanRegenerationWithContext(
+  planDate: string,
+  expectedCheckInCompletedAt: string,
+  deps: ProposeDayPlanRegenerationDeps,
+  now: Date = new Date(),
+): Promise<ProposeDayPlanRegenerationResult> {
   const loaded = await loadDayPlanPlanningInputs(planDate, deps);
   assertExpectedCheckIn(loaded.dayPlan.checkInCompletedAt, expectedCheckInCompletedAt);
 
   const inputFingerprint = createDayPlanRegenerationFingerprint(loaded);
-  const providerInput = recommendationInput(
-    loaded.planningContext,
-    loaded.openTasks,
-    loaded.commitments,
-  );
+  let recommendation;
+  if (loaded.openTasks.length === 0) {
+    recommendation = validateDayPlanRegenerationProposal(
+      {
+        explanation: "There are no open tasks to schedule today.",
+        recommendations: [],
+      },
+      {
+        openTaskIds: [],
+        commitmentIds: loaded.commitments.map((commitment) => commitment.id),
+      },
+    );
+  } else {
+    const providerInput = recommendationInput(
+      loaded.planningContext,
+      loaded.openTasks,
+      loaded.commitments,
+    );
 
-  let providerOutput: unknown;
-  try {
-    providerOutput = await deps.provider.recommend(providerInput);
-  } catch (error) {
-    if (
-      error instanceof DayPlanRecommendationProviderUnavailableError ||
-      error instanceof InvalidDayPlanRecommendationProviderOutputError
-    ) {
+    let providerOutput: unknown;
+    try {
+      providerOutput = await deps.provider.recommend(providerInput);
+    } catch (error) {
+      if (
+        error instanceof DayPlanRecommendationProviderUnavailableError ||
+        error instanceof InvalidDayPlanRecommendationProviderOutputError
+      ) {
+        throw error;
+      }
+      throw new DayPlanRecommendationProviderUnavailableError(error);
+    }
+
+    try {
+      recommendation = validateDayPlanRegenerationProposal(providerOutput, {
+        openTaskIds: loaded.openTasks.map((task) => task.id),
+        commitmentIds: loaded.commitments.map((commitment) => commitment.id),
+      });
+    } catch (error) {
+      if (error instanceof InvalidDayPlanRegenerationProposalError) {
+        throw new InvalidDayPlanRecommendationProviderOutputError(error);
+      }
       throw error;
     }
-    throw new DayPlanRecommendationProviderUnavailableError(error);
   }
 
-  let recommendation;
-  try {
-    recommendation = validateDayPlanRegenerationProposal(providerOutput, {
-      openTaskIds: loaded.openTasks.map((task) => task.id),
-      commitmentIds: loaded.commitments.map((commitment) => commitment.id),
-    });
-  } catch (error) {
-    if (error instanceof InvalidDayPlanRegenerationProposalError) {
-      throw new InvalidDayPlanRecommendationProviderOutputError(error);
-    }
-    throw error;
-  }
-
-  return Object.freeze({
+  const proposal = Object.freeze({
     schemaVersion: DAY_PLAN_REGENERATION_SCHEMA_VERSION,
     recommendation,
     inputFingerprint,
@@ -195,6 +229,8 @@ export async function proposeDayPlanRegeneration(
       ),
     ),
   });
+
+  return { proposal, planningContext: loaded.planningContext };
 }
 
 function validateApplicationRequest(
