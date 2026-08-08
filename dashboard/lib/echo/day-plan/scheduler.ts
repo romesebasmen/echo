@@ -6,6 +6,10 @@ import type { ResponsibilityArea } from "../types/responsibility-area.ts";
 import type { Task } from "../types/task.ts";
 import type { PlanningContext } from "../types/planning-context.ts";
 import type {
+  TaskRecommendationDisposition,
+  TaskSchedulingGuidance,
+} from "../types/day-plan-regeneration.ts";
+import type {
   Commitment,
   ScheduleBlock,
   ScheduleBlockSourceType,
@@ -13,10 +17,9 @@ import type {
 } from "../types/day-plan.ts";
 
 // Deterministic scheduling engine — no AI anywhere in this file. Given the
-// same tasks, commitments, and time window, it always produces the same
-// timeline. The one AI-assisted feature planned for a later milestone
-// (regenerate "with Echo") only reasons about which items to keep or defer;
-// it never replaces this arithmetic.
+// same tasks, commitments, time window, and optional validated recommendation
+// guidance, it always produces the same timeline. Regenerate "with Echo" may
+// supply bounded task dispositions, but it never replaces this arithmetic.
 
 const DEFAULT_TASK_MINUTES = 30;
 const MS_PER_MINUTE = 60 * 1000;
@@ -136,13 +139,37 @@ function packTasksIntoIntervals(
   scoredTasks: { task: Task; score: number }[],
   freeIntervals: WorkInterval[],
   planningContext: PlanningContext,
+  recommendationGuidance?: TaskSchedulingGuidance,
 ): { blocks: DraftScheduleBlock[]; unscheduled: Task[] } {
-  // Stable sort by score descending; ties broken explicitly by task id so
-  // the ordering never depends on incoming array order or engine-specific
-  // sort stability.
-  const ordered = [...scoredTasks].sort(
-    (a, b) => b.score - a.score || a.task.id.localeCompare(b.task.id),
-  );
+  const dispositionRank: Record<TaskRecommendationDisposition, number> = {
+    prioritize: 0,
+    keep: 1,
+    deprioritize: 2,
+    defer: 3,
+  };
+
+  function dispositionFor(taskId: string): TaskRecommendationDisposition | null {
+    if (!recommendationGuidance) return null;
+    const disposition = recommendationGuidance.taskDispositions.get(taskId);
+    if (!disposition) {
+      throw new Error(`Recommendation guidance is missing task ${taskId}.`);
+    }
+    return disposition;
+  }
+
+  // Without guidance this is the original score/id ordering. With trusted
+  // guidance, the recommendation category is the only new leading sort key;
+  // existing scoring and the explicit task-id tie-break remain authoritative
+  // within each category. Proposal array order never affects scheduling.
+  const ordered = [...scoredTasks].sort((a, b) => {
+    const aDisposition = dispositionFor(a.task.id);
+    const bDisposition = dispositionFor(b.task.id);
+    const categoryDifference =
+      aDisposition && bDisposition
+        ? dispositionRank[aDisposition] - dispositionRank[bDisposition]
+        : 0;
+    return categoryDifference || b.score - a.score || a.task.id.localeCompare(b.task.id);
+  });
 
   const intervals = freeIntervals.map((interval) => ({ ...interval }));
   const blocks: DraftScheduleBlock[] = [];
@@ -150,6 +177,11 @@ function packTasksIntoIntervals(
   let scheduledTaskMinutes = 0;
 
   for (const { task } of ordered) {
+    if (dispositionFor(task.id) === "defer") {
+      unscheduled.push(task);
+      continue;
+    }
+
     const duration = task.estimatedMinutes ?? DEFAULT_TASK_MINUTES;
 
     if (scheduledTaskMinutes + duration > planningContext.maxScheduledTaskMinutes) {
@@ -216,6 +248,9 @@ export interface GenerateScheduleInput {
   availableFrom: Date;
   endOfWorkTime: Date;
   planningContext: PlanningContext;
+  // Optional trusted output of proposalToSchedulerGuidance. All exact timing,
+  // capacity, commitment, and break decisions remain in this scheduler.
+  recommendationGuidance?: TaskSchedulingGuidance;
   now: Date;
 }
 
@@ -258,6 +293,7 @@ export function generateSchedule(input: GenerateScheduleInput): GenerateSchedule
     scoredTasks,
     freeIntervals,
     input.planningContext,
+    input.recommendationGuidance,
   );
 
   const blocks = [...commitmentBlocks, ...taskBlocks]

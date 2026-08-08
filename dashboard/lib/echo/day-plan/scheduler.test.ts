@@ -1,9 +1,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { generateSchedule, repackFrom, selectNextStep } from "./scheduler.ts";
+import {
+  proposalToSchedulerGuidance,
+  validateDayPlanRegenerationProposal,
+} from "./regeneration-proposal.ts";
 import type { Task } from "../types/task.ts";
 import type { Commitment, ScheduleBlock } from "../types/day-plan.ts";
 import type { PlanningContext } from "../types/planning-context.ts";
+import type {
+  DayPlanTaskRecommendation,
+  TaskSchedulingGuidance,
+} from "../types/day-plan-regeneration.ts";
 
 let taskCounter = 0;
 function fakeTask(overrides: Partial<Task> = {}): Task {
@@ -82,6 +90,22 @@ function fakePlanningContext(overrides: Partial<PlanningContext> = {}): Planning
     breakDurationMinutes: 10,
     ...overrides,
   };
+}
+
+function guidanceFor(
+  tasks: Task[],
+  recommendations: DayPlanTaskRecommendation[],
+  commitments: Commitment[] = [],
+): TaskSchedulingGuidance {
+  return proposalToSchedulerGuidance(
+    validateDayPlanRegenerationProposal(
+      { explanation: "A validated test proposal.", recommendations },
+      {
+        openTaskIds: tasks.map((task) => task.id),
+        commitmentIds: commitments.map((commitment) => commitment.id),
+      },
+    ),
+  );
 }
 
 // ---- generateSchedule ----
@@ -445,6 +469,225 @@ test("a commitment resets continuous-work tracking", () => {
   assert.equal(
     result.blocks.find((block) => block.title === "After commitment")?.startTime,
     "2026-07-23T13:45:00.000Z",
+  );
+});
+
+test("recommendation categories lead ordering while existing scores remain deterministic", () => {
+  const prioritizedLowScore = fakeTask({
+    id: "guided-prioritize",
+    priority: "low",
+    dueAt: null,
+  });
+  const keptHighScore = fakeTask({
+    id: "guided-keep",
+    priority: "high",
+    dueAt: "2026-07-20T15:00:00Z",
+  });
+  const deprioritizedHighScore = fakeTask({
+    id: "guided-deprioritize",
+    priority: "high",
+    dueAt: "2026-07-20T15:00:00Z",
+  });
+  const tasks = [deprioritizedHighScore, keptHighScore, prioritizedLowScore];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T18:00:00Z"),
+    planningContext: fakePlanningContext(),
+    recommendationGuidance: guidanceFor(tasks, [
+      { taskId: deprioritizedHighScore.id, disposition: "deprioritize" },
+      { taskId: keptHighScore.id, disposition: "keep" },
+      { taskId: prioritizedLowScore.id, disposition: "prioritize" },
+    ]),
+    now: NOW,
+  });
+
+  assert.deepEqual(
+    result.blocks.filter((block) => block.sourceType === "task").map((block) => block.sourceId),
+    [prioritizedLowScore.id, keptHighScore.id, deprioritizedHighScore.id],
+  );
+});
+
+test("proposal array order does not replace score ordering within a category", () => {
+  const urgent = fakeTask({
+    id: "same-category-urgent",
+    priority: "high",
+    dueAt: "2026-07-20T15:00:00Z",
+  });
+  const nonUrgent = fakeTask({
+    id: "same-category-non-urgent",
+    priority: "low",
+    dueAt: null,
+  });
+  const tasks = [nonUrgent, urgent];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T16:00:00Z"),
+    planningContext: fakePlanningContext(),
+    recommendationGuidance: guidanceFor(tasks, [
+      { taskId: nonUrgent.id, disposition: "keep" },
+      { taskId: urgent.id, disposition: "keep" },
+    ]),
+    now: NOW,
+  });
+
+  assert.deepEqual(
+    result.blocks.filter((block) => block.sourceType === "task").map((block) => block.sourceId),
+    [urgent.id, nonUrgent.id],
+  );
+});
+
+test("existing task-ID tie-break remains authoritative within a recommendation category", () => {
+  const taskZ = fakeTask({ id: "guided-task-z", title: "Z" });
+  const taskA = fakeTask({ id: "guided-task-a", title: "A" });
+  const tasks = [taskZ, taskA];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T16:00:00Z"),
+    planningContext: fakePlanningContext(),
+    recommendationGuidance: guidanceFor(tasks, [
+      { taskId: taskZ.id, disposition: "keep" },
+      { taskId: taskA.id, disposition: "keep" },
+    ]),
+    now: NOW,
+  });
+
+  assert.deepEqual(
+    result.blocks.filter((block) => block.sourceType === "task").map((block) => block.sourceId),
+    [taskA.id, taskZ.id],
+  );
+});
+
+test("deferred tasks are not packed, do not consume capacity, and surface as unscheduled", () => {
+  const deferred = fakeTask({
+    id: "guided-deferred",
+    estimatedMinutes: 60,
+    priority: "high",
+    dueAt: "2026-07-20T15:00:00Z",
+  });
+  const kept = fakeTask({ id: "guided-kept", estimatedMinutes: 60, priority: "low" });
+  const tasks = [deferred, kept];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T16:00:00Z"),
+    planningContext: fakePlanningContext({ maxScheduledTaskMinutes: 60 }),
+    recommendationGuidance: guidanceFor(tasks, [
+      { taskId: deferred.id, disposition: "defer" },
+      { taskId: kept.id, disposition: "keep" },
+    ]),
+    now: NOW,
+  });
+
+  assert.deepEqual(
+    result.blocks.filter((block) => block.sourceType === "task").map((block) => block.sourceId),
+    [kept.id],
+  );
+  assert.deepEqual(result.unscheduled.map((task) => task.id), [deferred.id]);
+});
+
+test("recommendation guidance cannot override capacity or commitments", () => {
+  const commitment = fakeCommitment({
+    id: "guided-commitment",
+    title: "Fixed class",
+    startTime: "2026-07-23T14:00:00Z",
+    endTime: "2026-07-23T15:00:00Z",
+  });
+  const first = fakeTask({ id: "guided-capacity-first", estimatedMinutes: 60 });
+  const second = fakeTask({ id: "guided-capacity-second", estimatedMinutes: 60 });
+  const tasks = [first, second];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [commitment],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T18:00:00Z"),
+    planningContext: fakePlanningContext({ maxScheduledTaskMinutes: 60 }),
+    recommendationGuidance: guidanceFor(
+      tasks,
+      [
+        { taskId: first.id, disposition: "prioritize" },
+        { taskId: second.id, disposition: "prioritize" },
+      ],
+      [commitment],
+    ),
+    now: NOW,
+  });
+
+  assert.equal(result.blocks.filter((block) => block.sourceType === "task").length, 1);
+  assert.deepEqual(result.unscheduled.map((task) => task.id), [second.id]);
+  assert.equal(
+    result.blocks.find((block) => block.sourceType === "commitment")?.sourceId,
+    commitment.id,
+  );
+});
+
+test("guided task ordering still obeys the deterministic break policy", () => {
+  const first = fakeTask({ id: "guided-break-first", estimatedMinutes: 30 });
+  const second = fakeTask({ id: "guided-break-second", estimatedMinutes: 30 });
+  const tasks = [first, second];
+
+  const result = generateSchedule({
+    tasks,
+    commitments: [],
+    availableFrom: new Date("2026-07-23T13:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T15:00:00Z"),
+    planningContext: fakePlanningContext({
+      breakAfterMinutes: 30,
+      breakDurationMinutes: 15,
+    }),
+    recommendationGuidance: guidanceFor(tasks, [
+      { taskId: first.id, disposition: "prioritize" },
+      { taskId: second.id, disposition: "keep" },
+    ]),
+    now: NOW,
+  });
+
+  const breakBlock = result.blocks.find((block) => block.sourceType === "break");
+  assert.ok(breakBlock);
+  assert.equal(breakBlock.startTime, "2026-07-23T13:30:00.000Z");
+  assert.equal(breakBlock.endTime, "2026-07-23T13:45:00.000Z");
+});
+
+test("guided deep-work tasks still choose the largest fitting free interval", () => {
+  const commitment = fakeCommitment({
+    id: "guided-deep-work-commitment",
+    startTime: "2026-07-23T15:00:00Z",
+    endTime: "2026-07-23T16:00:00Z",
+  });
+  const deepWorkTask = fakeTask({
+    id: "guided-deep-work",
+    deepWork: true,
+    estimatedMinutes: 45,
+  });
+
+  const result = generateSchedule({
+    tasks: [deepWorkTask],
+    commitments: [commitment],
+    availableFrom: new Date("2026-07-23T14:00:00Z"),
+    endOfWorkTime: new Date("2026-07-23T20:00:00Z"),
+    planningContext: fakePlanningContext(),
+    recommendationGuidance: guidanceFor(
+      [deepWorkTask],
+      [{ taskId: deepWorkTask.id, disposition: "prioritize" }],
+      [commitment],
+    ),
+    now: NOW,
+  });
+
+  assert.equal(
+    result.blocks.find((block) => block.sourceId === deepWorkTask.id)?.startTime,
+    "2026-07-23T16:00:00.000Z",
   );
 });
 
