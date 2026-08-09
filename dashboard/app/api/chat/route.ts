@@ -1,7 +1,10 @@
 import { after } from "next/server";
 import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
-import { getMockEchoReply } from "@/lib/echo/chat/mock-responder";
-import { getClaudeReply } from "@/lib/echo/ai/claude-responder";
+import {
+  ChatProviderUnavailableError,
+  getClaudeReply,
+  InvalidChatProviderResponseError,
+} from "@/lib/echo/ai/claude-responder";
 import {
   fromRole,
   getOrCreateConversationId,
@@ -74,16 +77,7 @@ export async function POST(request: Request) {
 
     if (userError) throw userError;
 
-    let replyText: string;
-    try {
-      replyText = await getClaudeReply(recentHistory, content, relevantMemories);
-    } catch (aiError) {
-      console.error(
-        "Claude API call failed, falling back to mock responder:",
-        formatError(aiError),
-      );
-      replyText = getMockEchoReply(content);
-    }
+    const replyText = await getClaudeReply(recentHistory, content, relevantMemories);
 
     const { data: echoRow, error: echoError } = await supabase
       .from("messages")
@@ -128,6 +122,17 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("POST /api/chat failed:", formatError(error));
+
+    if (
+      error instanceof ChatProviderUnavailableError ||
+      error instanceof InvalidChatProviderResponseError
+    ) {
+      return Response.json(
+        { error: "Echo couldn't respond because its AI provider is unavailable." },
+        { status: 502 },
+      );
+    }
+
     return Response.json({ error: "Could not send message." }, { status: 500 });
   }
 }
