@@ -180,7 +180,7 @@ test("truncates sanitized connection messages to the conservative limit", () => 
 test("production diagnostic boundary logs once, makes one attempt, and rethrows", async () => {
   const sdkError = apiError(401, "authentication_error", "req-one-attempt");
   let calls = 0;
-  const summaries: ReturnType<typeof summarizeAnthropicError>[] = [];
+  const messages: string[] = [];
 
   await assert.rejects(
     () => callAnthropicDayPlanModelWithDiagnostics(
@@ -188,13 +188,19 @@ test("production diagnostic boundary logs once, makes one attempt, and rethrows"
         calls += 1;
         throw sdkError;
       },
-      (summary) => summaries.push(summary),
+      (message) => messages.push(message),
     ),
     (error: unknown) => error === sdkError,
   );
 
   assert.equal(calls, 1);
-  assert.deepEqual(summaries, [summarizeAnthropicError(sdkError)]);
+  assert.equal(messages.length, 1);
+  const prefix = "Day-plan Anthropic request failed: ";
+  assert.ok(messages[0]?.startsWith(prefix));
+  assert.deepEqual(
+    JSON.parse(messages[0]!.slice(prefix.length)),
+    summarizeAnthropicError(sdkError),
+  );
 });
 
 test("system prompt establishes every deterministic scheduling boundary", () => {
@@ -264,6 +270,19 @@ test("provider makes one structured-output request and returns Phase 1 validated
   assert.equal(captured?.messages.length, 1);
   assert.equal(captured?.messages[0].role, "user");
   assert.equal(captured?.output_config?.format?.type, "json_schema");
+  const sentSchema = captured?.output_config?.format?.schema as
+    | {
+        properties: {
+          explanation: Record<string, unknown>;
+          recommendations: Record<string, unknown>;
+        };
+      }
+    | undefined;
+  assert.ok(sentSchema);
+  assert.equal("minLength" in sentSchema.properties.explanation, false);
+  assert.equal("maxLength" in sentSchema.properties.explanation, false);
+  assert.equal("minItems" in sentSchema.properties.recommendations, false);
+  assert.equal("maxItems" in sentSchema.properties.recommendations, false);
   assert.deepEqual(result, JSON.parse(validResponseText()));
 });
 

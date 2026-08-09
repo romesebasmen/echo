@@ -1,4 +1,5 @@
 import Anthropic, { APIConnectionError, APIError } from "@anthropic-ai/sdk";
+import { jsonSchemaOutputFormat } from "@anthropic-ai/sdk/helpers/json-schema";
 import {
   buildDayPlanRegenerationUserPrompt,
   DAY_PLAN_REGENERATION_SYSTEM_PROMPT,
@@ -49,9 +50,7 @@ export interface SafeAnthropicErrorSummary {
   safeMessage: string;
 }
 
-export type AnthropicErrorSummaryLogger = (
-  summary: SafeAnthropicErrorSummary,
-) => void;
+export type AnthropicDiagnosticLogger = (message: string) => void;
 
 function redactAndTruncateConnectionMessage(message: string): string {
   const redacted = message
@@ -109,14 +108,15 @@ export function summarizeAnthropicError(error: unknown): SafeAnthropicErrorSumma
 
 export async function callAnthropicDayPlanModelWithDiagnostics<T>(
   callModel: () => Promise<T>,
-  logError: AnthropicErrorSummaryLogger = (summary) => {
-    console.error("Day-plan Anthropic request failed:", summary);
+  logError: AnthropicDiagnosticLogger = (message) => {
+    console.error(message);
   },
 ): Promise<T> {
   try {
     return await callModel();
   } catch (error) {
-    logError(summarizeAnthropicError(error));
+    const summary = summarizeAnthropicError(error);
+    logError(`Day-plan Anthropic request failed: ${JSON.stringify(summary)}`);
     throw error;
   }
 }
@@ -144,8 +144,8 @@ function getClient(): Anthropic {
 
 export function buildDayPlanRegenerationOutputSchema(taskIds: readonly string[]) {
   const taskIdSchema = taskIds.length > 0
-    ? { type: "string", enum: [...taskIds] }
-    : { type: "string" };
+    ? { type: "string" as const, enum: [...taskIds] }
+    : { type: "string" as const };
 
   return {
     type: "object",
@@ -196,12 +196,11 @@ export function createClaudeDayPlanRecommendationProvider(
           max_tokens: MAX_OUTPUT_TOKENS,
           system: DAY_PLAN_REGENERATION_SYSTEM_PROMPT,
           output_config: {
-            format: {
-              type: "json_schema",
-              schema: buildDayPlanRegenerationOutputSchema(
+            format: jsonSchemaOutputFormat(
+              buildDayPlanRegenerationOutputSchema(
                 input.tasks.map((task) => task.id),
               ),
-            },
+            ),
           },
           messages: [
             { role: "user", content: buildDayPlanRegenerationUserPrompt(input) },
