@@ -18,6 +18,10 @@ import {
   releaseChatRequestLock,
   tryAcquireChatRequestLock,
 } from "@/lib/echo/chat/request-lock";
+import {
+  InvalidChatRequestError,
+  parseChatPostRequest,
+} from "@/lib/echo/chat/request";
 import type { Memory } from "@/lib/echo/types";
 
 const RECENT_HISTORY_LIMIT = 20;
@@ -50,12 +54,13 @@ export async function POST(request: Request) {
   let lockedConversationId: string | null = null;
 
   try {
-    const body = (await request.json()) as Record<string, unknown>;
-    const content = typeof body.content === "string" ? body.content.trim() : "";
-
-    if (!content) {
-      return Response.json({ error: "Message content is required." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const { content } = parseChatPostRequest(body);
 
     const supabase = getSupabaseServerClient();
     const conversationId = await getOrCreateConversationId();
@@ -141,6 +146,10 @@ export async function POST(request: Request) {
     );
   } catch (error) {
     console.error("POST /api/chat failed:", formatError(error));
+
+    if (error instanceof InvalidChatRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
 
     if (
       error instanceof ChatProviderUnavailableError ||

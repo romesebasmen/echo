@@ -3,6 +3,7 @@
 import { useId, useState, type FormEvent } from "react";
 import { useConversation } from "@/lib/echo/chat/useConversation";
 import { ChatMessageBubble } from "@/components/echo/chat/ChatMessageBubble";
+import { MAX_CHAT_MESSAGE_LENGTH } from "@/lib/echo/chat/request";
 
 export function ChatPanel() {
   const { messages, isLoading, isSending, error, sendMessage } = useConversation();
@@ -48,6 +49,7 @@ export function ChatPanel() {
             value={draft}
             onChange={(event) => setDraft(event.target.value)}
             placeholder="Type a message..."
+            maxLength={MAX_CHAT_MESSAGE_LENGTH}
             disabled={isSending}
             className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-60"
           />
