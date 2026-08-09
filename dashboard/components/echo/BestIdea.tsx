@@ -13,7 +13,7 @@ export function BestIdea({ idea }: { idea: IdeaOfTheDay }) {
   return (
     <section className="flex flex-col gap-5 rounded-2xl bg-surface px-6 py-8 sm:px-10 sm:py-10">
       <span className="text-xs font-medium uppercase tracking-wide text-accent">
-        Best Idea of the Day
+        Today&rsquo;s Editorial Prompt
       </span>
 
       <div className="flex flex-col gap-3">

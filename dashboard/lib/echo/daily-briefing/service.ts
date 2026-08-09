@@ -1,11 +1,11 @@
 import type { RadarItem } from "@/lib/echo/types";
-import { radarItems } from "@/lib/echo/daily-briefing/radar.mock";
-import { currentFocusReminder } from "@/lib/echo/daily-briefing/focus.mock";
+import { editorialRadarItems } from "@/lib/echo/daily-briefing/editorial-radar";
+import { editorialCurrentFocus } from "@/lib/echo/daily-briefing/editorial-focus";
 
 export async function getRadarItems(): Promise<RadarItem[]> {
-  return radarItems;
+  return editorialRadarItems;
 }
 
 export async function getCurrentFocus(): Promise<string> {
-  return currentFocusReminder;
+  return editorialCurrentFocus;
 }

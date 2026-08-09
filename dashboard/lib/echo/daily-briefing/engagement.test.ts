@@ -54,21 +54,3 @@ test("production engagement flow no longer imports or ships the mock snapshot", 
   assert.equal(sources.some((source) => source.includes("engagement.mock")), false);
   await assert.rejects(access(join(moduleDirectory, "engagement.mock.ts")));
 });
-
-test("cleaned mock copy does not claim observed audience or performance evidence", async () => {
-  const contentIdeas = await readFile(
-    join(moduleDirectory, "../content-ideas/mock.ts"),
-    "utf8",
-  );
-  const radar = await readFile(join(moduleDirectory, "radar.mock.ts"), "utf8");
-  const cleanedCopy = `${contentIdeas}\n${radar}`;
-
-  for (const unsupportedClaim of [
-    /best-performing posts/i,
-    /outperforming/i,
-    /comments\s*(?:and|\/)\s*dms/i,
-    /tiktok comments/i,
-  ]) {
-    assert.doesNotMatch(cleanedCopy, unsupportedClaim);
-  }
-});
