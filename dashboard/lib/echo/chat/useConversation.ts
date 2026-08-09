@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "@/lib/echo/types";
 import {
   hasResponseField,
@@ -18,6 +18,7 @@ interface ChatPostResponse {
 const GENERIC_ERROR = "Something went wrong. Please try again.";
 
 export function useConversation() {
+  const sendGate = useRef(false);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSending, setIsSending] = useState(false);
@@ -54,8 +55,9 @@ export function useConversation() {
 
   async function sendMessage(content: string): Promise<boolean> {
     const trimmed = content.trim();
-    if (!trimmed) return false;
+    if (!trimmed || sendGate.current) return false;
 
+    sendGate.current = true;
     setError(null);
     setIsSending(true);
     try {
@@ -80,6 +82,7 @@ export function useConversation() {
       setError("Echo couldn't respond just now. Please try again.");
       return false;
     } finally {
+      sendGate.current = false;
       setIsSending(false);
     }
   }

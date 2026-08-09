@@ -14,6 +14,10 @@ import {
 import { getRelevantMemories } from "@/lib/echo/memories/retrieval";
 import { extractAndApplyMemories } from "@/lib/echo/memories/extraction-service";
 import { formatError } from "@/lib/echo/errors";
+import {
+  releaseChatRequestLock,
+  tryAcquireChatRequestLock,
+} from "@/lib/echo/chat/request-lock";
 import type { Memory } from "@/lib/echo/types";
 
 const RECENT_HISTORY_LIMIT = 20;
@@ -43,6 +47,8 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  let lockedConversationId: string | null = null;
+
   try {
     const body = (await request.json()) as Record<string, unknown>;
     const content = typeof body.content === "string" ? body.content.trim() : "";
@@ -53,9 +59,16 @@ export async function POST(request: Request) {
 
     const supabase = getSupabaseServerClient();
     const conversationId = await getOrCreateConversationId();
+    if (!tryAcquireChatRequestLock(conversationId)) {
+      return Response.json(
+        { error: "Echo is already responding to this conversation." },
+        { status: 409 },
+      );
+    }
+    lockedConversationId = conversationId;
 
-    // Recent history is fetched before inserting the new user message, so
-    // it doesn't need to be de-duplicated against `content` below.
+    // The new message is passed separately to the provider, so it is not
+    // included in this history query.
     const recentHistory = await getRecentMessages(RECENT_HISTORY_LIMIT);
 
     let relevantMemories: Memory[];
@@ -69,34 +82,40 @@ export async function POST(request: Request) {
       relevantMemories = [];
     }
 
-    const { data: userRow, error: userError } = await supabase
-      .from("messages")
-      .insert({ conversation_id: conversationId, role: fromRole("user"), content })
-      .select("*")
-      .single();
-
-    if (userError) throw userError;
-
     const replyText = await getClaudeReply(recentHistory, content, relevantMemories);
 
-    const { data: echoRow, error: echoError } = await supabase
+    // One PostgreSQL insert statement keeps the exchange atomic: a provider
+    // failure writes neither side, and a database failure cannot leave only
+    // one half of a successfully generated exchange.
+    const { data: messageRows, error: messageError } = await supabase
       .from("messages")
-      .insert({
-        conversation_id: conversationId,
-        role: fromRole("echo"),
-        content: replyText,
-      })
-      .select("*")
-      .single();
+      .insert([
+        { conversation_id: conversationId, role: fromRole("user"), content },
+        {
+          conversation_id: conversationId,
+          role: fromRole("echo"),
+          content: replyText,
+        },
+      ])
+      .select("*");
 
-    if (echoError) throw echoError;
+    if (messageError) throw messageError;
+    const userRow = messageRows?.find((row) => row.role === fromRole("user"));
+    const echoRow = messageRows?.find((row) => row.role === fromRole("echo"));
+    if (!userRow || !echoRow) {
+      throw new Error("The saved chat exchange was incomplete.");
+    }
 
     const { error: touchError } = await supabase
       .from("conversations")
       .update({ updated_at: new Date().toISOString() })
       .eq("id", conversationId);
 
-    if (touchError) throw touchError;
+    if (touchError) {
+      // The exchange is already safely persisted. Conversation recency is
+      // useful metadata, but its failure must not encourage a duplicate retry.
+      console.error("Updating conversation recency failed:", formatError(touchError));
+    }
 
     // Memory extraction runs after the response is sent — its failure must
     // never affect the chat reply the user already received.
@@ -134,6 +153,10 @@ export async function POST(request: Request) {
     }
 
     return Response.json({ error: "Could not send message." }, { status: 500 });
+  } finally {
+    if (lockedConversationId) {
+      releaseChatRequestLock(lockedConversationId);
+    }
   }
 }
 
