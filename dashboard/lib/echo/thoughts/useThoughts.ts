@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Thought } from "@/lib/echo/types";
+import {
+  hasResponseField,
+  parseJsonResponse,
+} from "@/lib/echo/client/json-response";
 
 export interface ThoughtInput {
   content: string;
@@ -15,11 +19,25 @@ interface ThoughtResponse {
   thought: Thought;
 }
 
-interface ErrorResponse {
-  error: string;
+const GENERIC_ERROR = "Something went wrong. Please try again.";
+
+async function parseThoughtsResponse(response: Response): Promise<ThoughtsResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is ThoughtsResponse =>
+      hasResponseField(body, "thoughts") && Array.isArray(body.thoughts),
+  });
 }
 
-const GENERIC_ERROR = "Something went wrong. Please try again.";
+async function parseThoughtResponse(response: Response): Promise<ThoughtResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is ThoughtResponse =>
+      hasResponseField(body, "thought") &&
+      typeof body.thought === "object" &&
+      body.thought !== null,
+  });
+}
 
 export function useThoughts() {
   const [thoughts, setThoughts] = useState<Thought[]>([]);
@@ -32,10 +50,7 @@ export function useThoughts() {
     setError(null);
     try {
       const response = await fetch("/api/thoughts");
-      const body = (await response.json()) as ThoughtsResponse | ErrorResponse;
-      if (!response.ok || !("thoughts" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseThoughtsResponse(response);
       setThoughts(body.thoughts);
     } catch {
       setError("Could not load your thoughts. Please try again.");
@@ -61,10 +76,7 @@ export function useThoughts() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const body = (await response.json()) as ThoughtResponse | ErrorResponse;
-      if (!response.ok || !("thought" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseThoughtResponse(response);
       setThoughts((previous) => [body.thought, ...previous]);
       return true;
     } catch {
@@ -84,10 +96,7 @@ export function useThoughts() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const body = (await response.json()) as ThoughtResponse | ErrorResponse;
-      if (!response.ok || !("thought" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseThoughtResponse(response);
       setThoughts((previous) =>
         previous.map((thought) => (thought.id === id ? body.thought : thought)),
       );

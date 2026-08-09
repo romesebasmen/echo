@@ -8,6 +8,10 @@ import {
   saveThenGenerate,
   saveThenRequestRegeneration,
 } from "./client-flow";
+import {
+  hasResponseField,
+  parseJsonResponse,
+} from "@/lib/echo/client/json-response";
 import type {
   DayPlan,
   DayPlanRegenerationProposalEnvelope,
@@ -44,10 +48,6 @@ interface RegenerateDayPlanResponse {
   planningContext: PlanningContext;
 }
 
-interface ErrorResponse {
-  error: string;
-}
-
 const GENERIC_ERROR = "Something went wrong. Please try again.";
 
 export type DayPlanClientErrorKind =
@@ -68,15 +68,16 @@ function errorMessage(error: unknown): string {
 }
 
 async function responseBody<T>(response: Response): Promise<T> {
-  const body = (await response.json()) as T | ErrorResponse;
-  const hasError = typeof body === "object" && body !== null && "error" in body;
-  if (!response.ok || hasError) {
-    throw new DayPlanClientRequestError(
-      hasError ? (body as ErrorResponse).error : GENERIC_ERROR,
-      response.status,
-    );
-  }
-  return body as T;
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is T =>
+      typeof body === "object" &&
+      body !== null &&
+      !Array.isArray(body) &&
+      !hasResponseField(body, "error"),
+    createError: (message, status) =>
+      new DayPlanClientRequestError(message, status),
+  });
 }
 
 export function useDayPlan() {

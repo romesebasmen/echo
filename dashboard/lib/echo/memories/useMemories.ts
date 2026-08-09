@@ -5,6 +5,10 @@ import type {
   MemoryConfidence,
   MemoryImportance,
 } from "@/lib/echo/types";
+import {
+  hasResponseField,
+  parseJsonResponse,
+} from "@/lib/echo/client/json-response";
 
 export interface MemoryEditInput {
   title?: string;
@@ -22,11 +26,25 @@ interface MemoryResponse {
   memory: Memory;
 }
 
-interface ErrorResponse {
-  error: string;
+const GENERIC_ERROR = "Something went wrong. Please try again.";
+
+async function parseMemoriesResponse(response: Response): Promise<MemoriesResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is MemoriesResponse =>
+      hasResponseField(body, "memories") && Array.isArray(body.memories),
+  });
 }
 
-const GENERIC_ERROR = "Something went wrong. Please try again.";
+async function parseMemoryResponse(response: Response): Promise<MemoryResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is MemoryResponse =>
+      hasResponseField(body, "memory") &&
+      typeof body.memory === "object" &&
+      body.memory !== null,
+  });
+}
 
 export function useMemories() {
   const [memories, setMemories] = useState<Memory[]>([]);
@@ -39,10 +57,7 @@ export function useMemories() {
     setError(null);
     try {
       const response = await fetch("/api/memories");
-      const body = (await response.json()) as MemoriesResponse | ErrorResponse;
-      if (!response.ok || !("memories" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseMemoriesResponse(response);
       setMemories(body.memories);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load memories. Please try again.");
@@ -68,10 +83,7 @@ export function useMemories() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const body = (await response.json()) as MemoryResponse | ErrorResponse;
-      if (!response.ok || !("memory" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseMemoryResponse(response);
       setMemories((previous) =>
         previous.map((memory) => (memory.id === id ? body.memory : memory)),
       );

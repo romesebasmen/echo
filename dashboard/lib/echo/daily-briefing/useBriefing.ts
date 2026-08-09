@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DailyBriefing } from "@/lib/echo/types";
+import {
+  hasResponseField,
+  parseJsonResponse,
+} from "@/lib/echo/client/json-response";
 
 interface BriefingResponse {
   briefing: DailyBriefing;
 }
 
-interface ErrorResponse {
-  error: string;
-}
-
 const GENERIC_ERROR = "Something went wrong. Please try again.";
 
 async function parseBriefingResponse(response: Response): Promise<DailyBriefing> {
-  const body = (await response.json()) as BriefingResponse | ErrorResponse;
-  if (!response.ok || !("briefing" in body)) {
-    throw new Error("error" in body ? body.error : GENERIC_ERROR);
-  }
+  const body = await parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (candidate): candidate is BriefingResponse =>
+      hasResponseField(candidate, "briefing") &&
+      typeof candidate.briefing === "object" &&
+      candidate.briefing !== null,
+  });
   return body.briefing;
 }
 

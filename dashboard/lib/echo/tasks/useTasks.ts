@@ -6,6 +6,10 @@ import type {
   TaskPriority,
   TaskStatus,
 } from "@/lib/echo/types";
+import {
+  hasResponseField,
+  parseJsonResponse,
+} from "@/lib/echo/client/json-response";
 
 export interface CreateTaskInput {
   title: string;
@@ -38,11 +42,25 @@ interface TaskResponse {
   task: Task;
 }
 
-interface ErrorResponse {
-  error: string;
+const GENERIC_ERROR = "Something went wrong. Please try again.";
+
+async function parseTasksResponse(response: Response): Promise<TasksResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is TasksResponse =>
+      hasResponseField(body, "tasks") && Array.isArray(body.tasks),
+  });
 }
 
-const GENERIC_ERROR = "Something went wrong. Please try again.";
+async function parseTaskResponse(response: Response): Promise<TaskResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is TaskResponse =>
+      hasResponseField(body, "task") &&
+      typeof body.task === "object" &&
+      body.task !== null,
+  });
+}
 
 export function useTasks() {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -55,10 +73,7 @@ export function useTasks() {
     setError(null);
     try {
       const response = await fetch("/api/tasks");
-      const body = (await response.json()) as TasksResponse | ErrorResponse;
-      if (!response.ok || !("tasks" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseTasksResponse(response);
       setTasks(body.tasks);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load tasks. Please try again.");
@@ -84,10 +99,7 @@ export function useTasks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const body = (await response.json()) as TaskResponse | ErrorResponse;
-      if (!response.ok || !("task" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseTaskResponse(response);
       setTasks((previous) => [body.task, ...previous]);
       return true;
     } catch (err) {
@@ -107,10 +119,7 @@ export function useTasks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(input),
       });
-      const body = (await response.json()) as TaskResponse | ErrorResponse;
-      if (!response.ok || !("task" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseTaskResponse(response);
       setTasks((previous) => previous.map((task) => (task.id === id ? body.task : task)));
       return true;
     } catch (err) {

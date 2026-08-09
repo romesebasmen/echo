@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CreativeWork, CreativeWorkStatus } from "@/lib/echo/types";
+import {
+  hasResponseField,
+  parseJsonResponse,
+} from "@/lib/echo/client/json-response";
 
 interface CreativeWorksResponse {
   creativeWorks: CreativeWork[];
@@ -11,11 +15,29 @@ interface CreativeWorkResponse {
   generated?: boolean;
 }
 
-interface ErrorResponse {
-  error: string;
+const GENERIC_ERROR = "Something went wrong. Please try again.";
+
+async function parseCreativeWorksResponse(
+  response: Response,
+): Promise<CreativeWorksResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is CreativeWorksResponse =>
+      hasResponseField(body, "creativeWorks") && Array.isArray(body.creativeWorks),
+  });
 }
 
-const GENERIC_ERROR = "Something went wrong. Please try again.";
+async function parseCreativeWorkResponse(
+  response: Response,
+): Promise<CreativeWorkResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: GENERIC_ERROR,
+    isSuccessBody: (body): body is CreativeWorkResponse =>
+      hasResponseField(body, "creativeWork") &&
+      typeof body.creativeWork === "object" &&
+      body.creativeWork !== null,
+  });
+}
 
 export function useCreativeWorks() {
   const [creativeWorks, setCreativeWorks] = useState<CreativeWork[]>([]);
@@ -32,10 +54,7 @@ export function useCreativeWorks() {
     setError(null);
     try {
       const response = await fetch("/api/creative-works");
-      const body = (await response.json()) as CreativeWorksResponse | ErrorResponse;
-      if (!response.ok || !("creativeWorks" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseCreativeWorksResponse(response);
       setCreativeWorks(body.creativeWorks);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not load TikTok ideas. Please try again.");
@@ -61,10 +80,7 @@ export function useCreativeWorks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ thoughtId }),
       });
-      const body = (await response.json()) as CreativeWorkResponse | ErrorResponse;
-      if (!response.ok || !("creativeWork" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseCreativeWorkResponse(response);
       setCreativeWorks((previous) => {
         const alreadyListed = previous.some((work) => work.id === body.creativeWork.id);
         return alreadyListed
@@ -98,10 +114,7 @@ export function useCreativeWorks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ force }),
       });
-      const body = (await response.json()) as CreativeWorkResponse | ErrorResponse;
-      if (!response.ok || !("creativeWork" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseCreativeWorkResponse(response);
       setCreativeWorks((previous) =>
         previous.map((work) => (work.id === id ? body.creativeWork : work)),
       );
@@ -128,10 +141,7 @@ export function useCreativeWorks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ status }),
       });
-      const body = (await response.json()) as CreativeWorkResponse | ErrorResponse;
-      if (!response.ok || !("creativeWork" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseCreativeWorkResponse(response);
       setCreativeWorks((previous) =>
         previous.map((work) => (work.id === id ? body.creativeWork : work)),
       );
@@ -150,10 +160,7 @@ export function useCreativeWorks() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reflection }),
       });
-      const body = (await response.json()) as CreativeWorkResponse | ErrorResponse;
-      if (!response.ok || !("creativeWork" in body)) {
-        throw new Error("error" in body ? body.error : GENERIC_ERROR);
-      }
+      const body = await parseCreativeWorkResponse(response);
       setCreativeWorks((previous) =>
         previous.map((work) => (work.id === id ? body.creativeWork : work)),
       );
