@@ -8,15 +8,15 @@ import { CurrentFocus } from "@/components/echo/CurrentFocus";
 import { DailyCheckInPanel } from "@/components/echo/day-plan/DailyCheckInPanel";
 import {
   getCurrentFocus,
-  getEngagementSnapshot,
   getRadarItems,
 } from "@/lib/echo/daily-briefing/service";
+import { getEngagementState } from "@/lib/echo/daily-briefing/engagement";
 import { getBestIdea } from "@/lib/echo/content-ideas/service";
 
 export default async function Home() {
-  const [engagementSnapshot, bestIdea, radarItems, currentFocusReminder] =
+  const [engagementState, bestIdea, radarItems, currentFocusReminder] =
     await Promise.all([
-      getEngagementSnapshot(),
+      getEngagementState(),
       getBestIdea(),
       getRadarItems(),
       getCurrentFocus(),
@@ -27,7 +27,7 @@ export default async function Home() {
       <WelcomeHeader />
       <DailyCheckInPanel />
       <DailyBriefing />
-      <EngagementTracker snapshot={engagementSnapshot} />
+      <EngagementTracker state={engagementState} />
       <BestIdea idea={bestIdea} />
       <OnYourRadar items={radarItems} />
       <ThoughtInbox />

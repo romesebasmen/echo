@@ -3,65 +3,66 @@ import type { RadarItem } from "@/lib/echo/types";
 export const radarItems: RadarItem[] = [
   {
     id: "radar-1",
-    tag: "Noticed",
-    headline: "People keep asking how you actually finish your random ideas",
+    tag: "Creative prompt",
+    headline: "Show how you decide which random ideas are worth finishing",
     context:
-      "A few comments and DMs this week specifically called out that you follow through, not just talk about ideas.",
+      "A creator-process story could explain how you choose which ideas deserve follow-through.",
     whyItMatters:
-      "This is close to your actual identity — curious person who follows through — not a trend to chase.",
+      "This fits your working identity: a curious person who actually follows through.",
     contentAngle:
       "A short, honest video on how you actually decide which random ideas are worth finishing.",
-    source: "Comments / DMs",
-    freshness: "this week",
+    source: "Creative hypothesis",
+    freshness: "Worth exploring",
   },
   {
     id: "radar-2",
-    tag: "TAMU",
-    headline: "Parking got worse this week — again",
+    tag: "Creative prompt",
+    headline: "Turn campus parking frustration into a field report",
     context:
-      "Multiple TAMU threads complaining about construction closing two more lots.",
+      "Campus parking is a familiar source of friction that could support a grounded reaction video.",
     whyItMatters:
-      "A shared, current frustration people are already venting about right now.",
-    contentAngle: "A short field report on the parking situation this week.",
-    source: "r/aggies",
-    freshness: "yesterday",
+      "It gives you a concrete situation to react to without inventing a broader trend.",
+    contentAngle:
+      "A short field report on a parking experience you actually encounter.",
+    source: "Creative hypothesis",
+    freshness: "Worth exploring",
   },
   {
     id: "radar-3",
-    tag: "Trend",
-    headline: "Deadpan, silent reactions are having a moment",
+    tag: "Format prompt",
+    headline: "Try a deadpan, caption-only reaction",
     context:
-      "Creators are filming caption-only reactions with no commentary over trending audio.",
+      "A silent reaction format could turn a mildly absurd moment into a simple visual joke.",
     whyItMatters:
       "Fits the way you already react to things without needing to perform a bit.",
     contentAngle:
       "A silent, caption-only reaction to something mildly absurd on campus.",
-    source: "TikTok Discover",
-    freshness: "6 hours ago",
+    source: "Creative hypothesis",
+    freshness: "Worth exploring",
   },
   {
     id: "radar-4",
-    tag: "Complaint",
-    headline: "Group project free-riders are a running joke again",
+    tag: "Story prompt",
+    headline: "Revisit a group-project free-rider story",
     context:
-      "A familiar but evergreen complaint cycling back through college TikTok.",
+      "Group-project frustration is an evergreen college experience that could support a personal story.",
     whyItMatters:
-      "Universally relatable to any student audience, easy to react to personally.",
+      "It gives you something specific to react to from your own experience.",
     contentAngle:
       "Tell the story of your worst group project experience, straight and dry.",
-    source: "TikTok comments",
-    freshness: "1 day ago",
+    source: "Creative hypothesis",
+    freshness: "Worth exploring",
   },
   {
     id: "radar-5",
-    tag: "Pop culture",
-    headline: "A tiny awards-show moment is getting stretched into days of takes",
+    tag: "Reaction prompt",
+    headline: "React to a pop-culture moment that is being overanalyzed",
     context:
-      "A small on-stage moment from this week's show is getting milked far past what it deserves.",
+      "When you encounter a minor moment receiving outsized analysis, it may be useful reaction material.",
     whyItMatters:
-      "Good material for a quick, dry take instead of a full breakdown.",
+      "The format suits a quick, dry take instead of a full breakdown.",
     contentAngle: "A short, unbothered take on why the internet is overreacting.",
-    source: "X trending topics",
-    freshness: "12 hours ago",
+    source: "Creative hypothesis",
+    freshness: "Worth exploring",
   },
 ];

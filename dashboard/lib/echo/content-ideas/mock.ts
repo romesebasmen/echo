@@ -21,12 +21,12 @@ export const ideaOfTheDay: IdeaOfTheDay = {
     },
     {
       label:
-        "Your last three best-performing posts all opened with a complaint.",
-      kind: "pattern",
+        "A complaint-led opening gives this concept a clear, immediate premise.",
+      kind: "hypothesis",
     },
     {
       label:
-        "Reaction-driven, single-frustration videos may be outperforming scripted formats for you right now.",
+        "A simple reaction format is worth testing against more scripted ideas.",
       kind: "hypothesis",
     },
   ],

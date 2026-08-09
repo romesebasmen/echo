@@ -24,6 +24,26 @@ export interface EngagementSnapshot {
   insight: string;
 }
 
+export interface VerifiedSocialSource {
+  connectionId: string;
+  platform: Platform;
+  verificationStatus: "verified";
+  verifiedAt: string;
+}
+
+export type EngagementState =
+  | { status: "not-connected" }
+  | {
+      status: "available";
+      source: VerifiedSocialSource;
+      snapshot: EngagementSnapshot;
+    }
+  | {
+      status: "temporarily-unavailable";
+      source: VerifiedSocialSource;
+      lastSuccessfulSyncAt: string | null;
+    };
+
 export type Effort = "Low" | "Medium" | "High";
 
 export type Confidence = "Low" | "Medium" | "High";

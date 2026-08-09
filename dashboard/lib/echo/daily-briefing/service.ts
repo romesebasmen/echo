@@ -1,11 +1,6 @@
-import type { EngagementSnapshot, RadarItem } from "@/lib/echo/types";
-import { engagementSnapshot } from "@/lib/echo/daily-briefing/engagement.mock";
+import type { RadarItem } from "@/lib/echo/types";
 import { radarItems } from "@/lib/echo/daily-briefing/radar.mock";
 import { currentFocusReminder } from "@/lib/echo/daily-briefing/focus.mock";
-
-export async function getEngagementSnapshot(): Promise<EngagementSnapshot> {
-  return engagementSnapshot;
-}
 
 export async function getRadarItems(): Promise<RadarItem[]> {
   return radarItems;
