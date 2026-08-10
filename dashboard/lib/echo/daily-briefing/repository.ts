@@ -1,5 +1,6 @@
 import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
 import type { BriefingPatternKind, DailyBriefing } from "@/lib/echo/types";
+import { getBriefingDate } from "@/lib/echo/daily-briefing/date";
 
 const USER_ID = "sebastian";
 
@@ -57,8 +58,8 @@ function toBriefing(row: BriefingRow): DailyBriefing {
   };
 }
 
-export function todayDateString(): string {
-  return new Date().toISOString().slice(0, 10);
+export function todayDateString(now = new Date()): string {
+  return getBriefingDate(now);
 }
 
 export async function getBriefingForDate(

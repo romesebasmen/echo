@@ -17,7 +17,7 @@ const RECENT_MESSAGE_LIMIT = 20;
 const RECENT_THOUGHT_LIMIT = 10;
 const RELEVANT_MEMORY_LIMIT = 15;
 
-async function buildAndSaveBriefing(): Promise<DailyBriefing> {
+async function buildAndSaveBriefing(briefingDate: string): Promise<DailyBriefing> {
   const [
     recentMessages,
     recentThoughts,
@@ -82,7 +82,7 @@ async function buildAndSaveBriefing(): Promise<DailyBriefing> {
   });
 
   return saveBriefing({
-    briefingDate: todayDateString(),
+    briefingDate,
     greeting: generated.greeting,
     whatChanged: generated.whatChanged,
     patternNoticed: generated.patternNoticed,
@@ -93,11 +93,12 @@ async function buildAndSaveBriefing(): Promise<DailyBriefing> {
 }
 
 export async function getTodaysBriefing(): Promise<DailyBriefing> {
-  const cached = await getBriefingForDate(todayDateString());
+  const briefingDate = todayDateString();
+  const cached = await getBriefingForDate(briefingDate);
   if (cached) return cached;
-  return buildAndSaveBriefing();
+  return buildAndSaveBriefing(briefingDate);
 }
 
 export async function regenerateTodaysBriefing(): Promise<DailyBriefing> {
-  return buildAndSaveBriefing();
+  return buildAndSaveBriefing(todayDateString());
 }
