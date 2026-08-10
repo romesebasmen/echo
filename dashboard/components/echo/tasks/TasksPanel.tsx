@@ -11,6 +11,11 @@ import type {
   TaskEnergyLevel,
   TaskPriority,
 } from "@/lib/echo/types";
+import {
+  MAX_TASK_ESTIMATED_MINUTES,
+  MAX_TASK_TITLE_LENGTH,
+  MIN_TASK_ESTIMATED_MINUTES,
+} from "@/lib/echo/tasks/request";
 
 const LEVELS: (TaskEnergyLevel | TaskPriority)[] = ["low", "medium", "high"];
 
@@ -76,6 +81,7 @@ export function TasksPanel() {
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             required
+            maxLength={MAX_TASK_TITLE_LENGTH}
             className={inputClassName}
           />
         </div>
@@ -123,7 +129,9 @@ export function TasksPanel() {
             <input
               id={minutesId}
               type="number"
-              min={0}
+              min={MIN_TASK_ESTIMATED_MINUTES}
+              max={MAX_TASK_ESTIMATED_MINUTES}
+              step={1}
               value={estimatedMinutes}
               onChange={(event) => setEstimatedMinutes(event.target.value)}
               className={inputClassName}

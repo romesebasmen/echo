@@ -16,7 +16,7 @@ export interface CreateTaskInput {
   responsibilityArea: ResponsibilityArea;
   description?: string;
   dueAt?: string;
-  estimatedMinutes?: number;
+  estimatedMinutes?: number | null;
   energyRequired?: TaskEnergyLevel;
   priority?: TaskPriority;
   deepWork?: boolean;
@@ -28,7 +28,7 @@ export interface UpdateTaskInput {
   description?: string | null;
   status?: TaskStatus;
   dueAt?: string | null;
-  estimatedMinutes?: number;
+  estimatedMinutes?: number | null;
   energyRequired?: TaskEnergyLevel;
   priority?: TaskPriority;
   deepWork?: boolean;

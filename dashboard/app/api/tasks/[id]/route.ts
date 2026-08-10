@@ -5,19 +5,12 @@ import {
   updateTask,
 } from "@/lib/echo/tasks/repository";
 import { formatError } from "@/lib/echo/errors";
-import { RESPONSIBILITY_AREAS } from "@/lib/echo/types";
-import type { TaskEnergyLevel, TaskPriority, TaskStatus } from "@/lib/echo/types";
+import {
+  InvalidTaskRequestError,
+  parseTaskUpdateRequest,
+} from "@/lib/echo/tasks/request";
 
 // No Anthropic import anywhere in this file.
-
-const STATUSES: TaskStatus[] = ["open", "done"];
-const LEVELS: (TaskEnergyLevel | TaskPriority)[] = ["low", "medium", "high"];
-
-function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | undefined {
-  return typeof value === "string" && (allowed as readonly string[]).includes(value)
-    ? (value as T)
-    : undefined;
-}
 
 function handleTasksError(routeLabel: string, error: unknown) {
   if (error instanceof MissingTasksTableError) {
@@ -38,69 +31,36 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
-
-    const title =
-      typeof body.title === "string" && body.title.trim() ? body.title.trim() : undefined;
-    const description =
-      body.description === null
-        ? null
-        : typeof body.description === "string" && body.description.trim()
-          ? body.description.trim()
-          : undefined;
-    const responsibilityArea = pickEnum(body.responsibilityArea, RESPONSIBILITY_AREAS);
-    const status = pickEnum(body.status, STATUSES);
-    const dueAt =
-      body.dueAt === null ? null : typeof body.dueAt === "string" && body.dueAt ? body.dueAt : undefined;
-    const estimatedMinutes =
-      typeof body.estimatedMinutes === "number" && Number.isFinite(body.estimatedMinutes)
-        ? body.estimatedMinutes
-        : undefined;
-    const energyRequired = pickEnum(body.energyRequired, LEVELS) as TaskEnergyLevel | undefined;
-    const priority = pickEnum(body.priority, LEVELS) as TaskPriority | undefined;
-    const deepWork = typeof body.deepWork === "boolean" ? body.deepWork : undefined;
-
-    if (
-      !title &&
-      description === undefined &&
-      !responsibilityArea &&
-      !status &&
-      dueAt === undefined &&
-      estimatedMinutes === undefined &&
-      !energyRequired &&
-      !priority &&
-      deepWork === undefined
-    ) {
-      return Response.json({ error: "No valid fields to update." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const input = parseTaskUpdateRequest(body);
 
     // completedAt is derived here, not left to the client — stamped when
     // entering "done" only if not already set (so a redundant PATCH doesn't
     // overwrite the original completion time), cleared when reopened.
     let completedAt: string | null | undefined;
-    if (status === "done" || status === "open") {
+    if (input.status === "done" || input.status === "open") {
       const current = await getTaskById(id);
       if (!current) {
         return Response.json({ error: "Task not found." }, { status: 404 });
       }
-      completedAt = status === "done" ? (current.completedAt ?? new Date().toISOString()) : null;
+      completedAt = input.status === "done" ? (current.completedAt ?? new Date().toISOString()) : null;
     }
 
     const task = await updateTask(id, {
-      title,
-      description,
-      responsibilityArea,
-      status,
-      dueAt,
-      estimatedMinutes,
-      energyRequired,
-      priority,
-      deepWork,
+      ...input,
       completedAt,
     });
 
     return Response.json({ task });
   } catch (error) {
+    if (error instanceof InvalidTaskRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     return handleTasksError("PATCH /api/tasks/[id]", error);
   }
 }
