@@ -11,9 +11,14 @@ const migration = readFileSync(
 ).toLowerCase();
 
 test("task block transitions lock and validate the current Sebastian plan", () => {
-  assert.match(migration, /join public\.day_plans/);
+  assert.match(migration, /from public\.day_plans as day_plan/);
+  assert.match(migration, /join public\.schedule_blocks as schedule_block/);
   assert.match(migration, /day_plan\.user_id = 'sebastian'/);
-  assert.match(migration, /for update of schedule_block, day_plan/);
+  const planLock = migration.indexOf("for update of day_plan");
+  const blockLock = migration.indexOf("and day_plan_id = v_plan.id");
+  assert.ok(planLock >= 0);
+  assert.ok(blockLock > planLock);
+  assert.match(migration.slice(blockLock), /for update/);
   assert.match(migration, /v_plan\.status <> 'generated'/);
   assert.match(migration, /at time zone 'america\/chicago'/);
   assert.match(migration, /v_block\.source_type <> 'task'/);

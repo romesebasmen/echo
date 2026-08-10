@@ -25,14 +25,27 @@ begin
     raise exception 'ECHO_INVALID_SCHEDULE_BLOCK_STATUS';
   end if;
 
-  select schedule_block, day_plan
-    into v_block, v_plan
-    from public.schedule_blocks as schedule_block
-    join public.day_plans as day_plan
-      on day_plan.id = schedule_block.day_plan_id
+  -- Lock in the same plan-then-block order as schedule replacement so the
+  -- two write paths cannot deadlock each other.
+  select day_plan.*
+    into v_plan
+    from public.day_plans as day_plan
+    join public.schedule_blocks as schedule_block
+      on schedule_block.day_plan_id = day_plan.id
     where schedule_block.id = p_block_id
       and day_plan.user_id = 'sebastian'
-    for update of schedule_block, day_plan;
+    for update of day_plan;
+
+  if not found then
+    raise exception 'ECHO_SCHEDULE_BLOCK_NOT_FOUND';
+  end if;
+
+  select *
+    into v_block
+    from public.schedule_blocks
+    where id = p_block_id
+      and day_plan_id = v_plan.id
+    for update;
 
   if not found then
     raise exception 'ECHO_SCHEDULE_BLOCK_NOT_FOUND';
