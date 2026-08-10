@@ -1,5 +1,7 @@
 import {
   getDayPlanForDate,
+  listCommitments,
+  MissingCommitmentsTableError,
   MissingDayPlansTableError,
   saveDayPlanCheckIn,
 } from "@/lib/echo/day-plan/repository";
@@ -27,6 +29,7 @@ function handleDayPlanError(routeLabel: string, error: unknown) {
   }
   if (
     error instanceof MissingDayPlansTableError ||
+    error instanceof MissingCommitmentsTableError ||
     error instanceof MissingScheduleBlocksTableError ||
     error instanceof MissingTasksTableError
   ) {
@@ -50,6 +53,7 @@ export async function GET() {
     const planDate = toUserDateString(new Date());
     const state = await loadCurrentDayPlanState(planDate, {
       getDayPlanForDate,
+      listCommitments,
       listScheduleBlocks,
       listTasks,
     });
@@ -153,6 +157,7 @@ export async function PUT(request: Request) {
 
     const state = await loadCurrentDayPlanState(planDate, {
       getDayPlanForDate: async () => dayPlan,
+      listCommitments,
       listScheduleBlocks,
       listTasks,
     });

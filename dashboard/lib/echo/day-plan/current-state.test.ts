@@ -4,7 +4,7 @@ import {
   loadCurrentDayPlanState,
   type LoadCurrentDayPlanStateDeps,
 } from "./current-state.ts";
-import type { DayPlan, ScheduleBlock } from "../types/day-plan.ts";
+import type { Commitment, DayPlan, ScheduleBlock } from "../types/day-plan.ts";
 import type { Task } from "../types/task.ts";
 
 function fakeDayPlan(overrides: Partial<DayPlan> = {}): DayPlan {
@@ -68,8 +68,21 @@ function fakeBlock(
   };
 }
 
+function fakeCommitment(id = "commitment-1"): Commitment {
+  return {
+    id,
+    dayPlanId: "plan-1",
+    title: "Class",
+    startTime: "2026-08-09T16:00:00.000Z",
+    endTime: "2026-08-09T17:00:00.000Z",
+    responsibilityArea: "texas-am",
+    createdAt: "2026-08-09T13:00:00.000Z",
+  };
+}
+
 function depsFor(options: {
   dayPlan: DayPlan | null;
+  commitments?: Commitment[];
   blocks?: ScheduleBlock[];
   tasks?: Task[];
   calls?: string[];
@@ -82,6 +95,10 @@ function depsFor(options: {
     async listScheduleBlocks() {
       options.calls?.push("listScheduleBlocks");
       return options.blocks ?? [];
+    },
+    async listCommitments() {
+      options.calls?.push("listCommitments");
+      return options.commitments ?? [];
     },
     async listTasks(query) {
       options.calls?.push(`listTasks:${query.status ?? "all"}`);
@@ -100,24 +117,31 @@ test("loadCurrentDayPlanState returns an empty state when today's plan does not 
   assert.deepEqual(result, {
     dayPlan: null,
     planningContext: null,
+    commitments: [],
     scheduleBlocks: [],
     unscheduled: [],
   });
   assert.deepEqual(calls, ["getDayPlanForDate"]);
 });
 
-test("loadCurrentDayPlanState does not expose blocks for a setup plan", async () => {
+test("loadCurrentDayPlanState exposes commitments but not stale blocks for a setup plan", async () => {
   const calls: string[] = [];
   const dayPlan = fakeDayPlan({ status: "setup" });
   const result = await loadCurrentDayPlanState(
     dayPlan.planDate,
-    depsFor({ dayPlan, blocks: [fakeBlock("old", "task", "task-1")], calls }),
+    depsFor({
+      dayPlan,
+      commitments: [fakeCommitment()],
+      blocks: [fakeBlock("old", "task", "task-1")],
+      calls,
+    }),
   );
 
   assert.equal(result.planningContext?.capacityTier, "steady");
   assert.deepEqual(result.scheduleBlocks, []);
   assert.deepEqual(result.unscheduled, []);
-  assert.deepEqual(calls, ["getDayPlanForDate"]);
+  assert.deepEqual(result.commitments.map((item) => item.id), ["commitment-1"]);
+  assert.deepEqual(calls, ["getDayPlanForDate", "listCommitments"]);
 });
 
 test("loadCurrentDayPlanState does not expose a generated plan with an incomplete check-in", async () => {
@@ -131,7 +155,8 @@ test("loadCurrentDayPlanState does not expose a generated plan with an incomplet
   assert.equal(result.planningContext, null);
   assert.deepEqual(result.scheduleBlocks, []);
   assert.deepEqual(result.unscheduled, []);
-  assert.deepEqual(calls, ["getDayPlanForDate"]);
+  assert.deepEqual(result.commitments, []);
+  assert.deepEqual(calls, ["getDayPlanForDate", "listCommitments"]);
 });
 
 test("loadCurrentDayPlanState reloads persisted blocks and derives unscheduled open tasks", async () => {
@@ -142,6 +167,7 @@ test("loadCurrentDayPlanState reloads persisted blocks and derives unscheduled o
     dayPlan.planDate,
     depsFor({
       dayPlan,
+      commitments: [fakeCommitment()],
       blocks: [
         fakeBlock("task", "task", scheduled.id),
         fakeBlock("commitment", "commitment", "commitment-1"),
@@ -152,6 +178,7 @@ test("loadCurrentDayPlanState reloads persisted blocks and derives unscheduled o
   );
 
   assert.equal(result.scheduleBlocks.length, 3);
+  assert.deepEqual(result.commitments.map((item) => item.id), ["commitment-1"]);
   assert.deepEqual(result.unscheduled.map((task) => task.id), [deferred.id]);
 });
 

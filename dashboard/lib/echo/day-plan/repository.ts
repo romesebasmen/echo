@@ -25,6 +25,36 @@ export class MissingCommitmentsTableError extends Error {
   }
 }
 
+export class MissingCommitmentMutationMigrationError extends Error {
+  constructor() {
+    super(
+      "The commitment-management migration has not been applied. Apply the version-controlled Supabase migrations, then try again.",
+    );
+    this.name = "MissingCommitmentMutationMigrationError";
+  }
+}
+
+export class CommitmentNotFoundError extends Error {
+  constructor() {
+    super("Commitment not found.");
+    this.name = "CommitmentNotFoundError";
+  }
+}
+
+export class CommitmentDayPlanNotFoundError extends Error {
+  constructor() {
+    super("Today's day plan was not found. Save the check-in first.");
+    this.name = "CommitmentDayPlanNotFoundError";
+  }
+}
+
+export class InvalidCommitmentPersistenceError extends Error {
+  constructor() {
+    super("The commitment could not be saved for today's plan.");
+    this.name = "InvalidCommitmentPersistenceError";
+  }
+}
+
 export interface DayPlanRow {
   id: string;
   user_id: string;
@@ -42,7 +72,7 @@ export interface DayPlanRow {
   updated_at: string;
 }
 
-interface CommitmentRow {
+export interface CommitmentRow {
   id: string;
   day_plan_id: string;
   title: string;
@@ -84,7 +114,7 @@ export function mapDayPlanRow(row: DayPlanRow): DayPlan {
   };
 }
 
-function toCommitment(row: CommitmentRow): Commitment {
+export function mapCommitmentRow(row: CommitmentRow): Commitment {
   return {
     id: row.id,
     dayPlanId: row.day_plan_id,
@@ -178,7 +208,7 @@ export async function listCommitments(dayPlanId: string): Promise<Commitment[]> 
     throw error;
   }
 
-  return (data ?? []).map(toCommitment);
+  return (data ?? []).map(mapCommitmentRow);
 }
 
 export interface CreateCommitmentInput {
@@ -190,35 +220,89 @@ export interface CreateCommitmentInput {
 }
 
 export async function createCommitment(input: CreateCommitmentInput): Promise<Commitment> {
-  const supabase = getSupabaseServerClient();
-
-  const { data, error } = await supabase
-    .from("commitments")
-    .insert({
-      day_plan_id: input.dayPlanId,
-      title: input.title,
-      start_time: input.startTime,
-      end_time: input.endTime,
-      responsibility_area: input.responsibilityArea ?? null,
-    })
-    .select("*")
-    .single();
-
-  if (error) {
-    if (isMissingTableError(error)) throw new MissingCommitmentsTableError();
-    throw error;
-  }
-
-  return toCommitment(data as CommitmentRow);
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return createCommitmentWithRpc(input, callSupabaseServiceRoleRpc);
 }
 
-export async function deleteCommitment(id: string): Promise<void> {
-  const supabase = getSupabaseServerClient();
+function throwCommitmentMutationError(
+  functionName: string,
+  error: PostgrestErrorLike,
+): never {
+  const message = error.message ?? "";
+  if (
+    (error.code === "PGRST202" || error.code === "42883") &&
+    message.toLowerCase().includes(functionName)
+  ) {
+    throw new MissingCommitmentMutationMigrationError();
+  }
+  if (isMissingTableError(error)) throw new MissingCommitmentsTableError();
+  if (error.code === "P0001" && message.includes("ECHO_DAY_PLAN_NOT_FOUND")) {
+    throw new CommitmentDayPlanNotFoundError();
+  }
+  if (error.code === "P0001" && message.includes("ECHO_COMMITMENT_NOT_FOUND")) {
+    throw new CommitmentNotFoundError();
+  }
+  if (
+    error.code === "P0001" &&
+    (message.includes("ECHO_INVALID_COMMITMENT") ||
+      message.includes("ECHO_COMMITMENT_WRONG_DAY"))
+  ) {
+    throw new InvalidCommitmentPersistenceError();
+  }
+  throw error;
+}
 
-  const { error } = await supabase.from("commitments").delete().eq("id", id);
+export async function createCommitmentWithRpc(
+  input: CreateCommitmentInput,
+  callRpc: ServiceRoleRpcCaller,
+): Promise<Commitment> {
+  const { data, error } = await callRpc("create_day_plan_commitment", {
+    p_day_plan_id: input.dayPlanId,
+    p_title: input.title,
+    p_start_time: input.startTime,
+    p_end_time: input.endTime,
+    p_responsibility_area: input.responsibilityArea ?? null,
+  });
 
   if (error) {
-    if (isMissingTableError(error)) throw new MissingCommitmentsTableError();
-    throw error;
+    throwCommitmentMutationError("create_day_plan_commitment", error);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new InvalidCommitmentPersistenceError();
+  }
+  return mapCommitmentRow(data as CommitmentRow);
+}
+
+export async function deleteCommitment(
+  dayPlanId: string,
+  commitmentId: string,
+): Promise<void> {
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return deleteCommitmentWithRpc(
+    dayPlanId,
+    commitmentId,
+    callSupabaseServiceRoleRpc,
+  );
+}
+
+export async function deleteCommitmentWithRpc(
+  dayPlanId: string,
+  commitmentId: string,
+  callRpc: ServiceRoleRpcCaller,
+): Promise<void> {
+  const { data, error } = await callRpc("delete_day_plan_commitment", {
+    p_day_plan_id: dayPlanId,
+    p_commitment_id: commitmentId,
+  });
+
+  if (error) {
+    throwCommitmentMutationError("delete_day_plan_commitment", error);
+  }
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new InvalidCommitmentPersistenceError();
   }
 }

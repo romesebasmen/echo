@@ -1,11 +1,12 @@
 import { isCheckInComplete } from "./check-in.ts";
 import { createPlanningContext } from "./planning-context.ts";
-import type { DayPlan, ScheduleBlock } from "../types/day-plan.ts";
+import type { Commitment, DayPlan, ScheduleBlock } from "../types/day-plan.ts";
 import type { PlanningContext } from "../types/planning-context.ts";
 import type { Task, TaskStatus } from "../types/task.ts";
 
 export interface LoadCurrentDayPlanStateDeps {
   getDayPlanForDate: (planDate: string) => Promise<DayPlan | null>;
+  listCommitments: (dayPlanId: string) => Promise<Commitment[]>;
   listScheduleBlocks: (dayPlanId: string) => Promise<ScheduleBlock[]>;
   listTasks: (options: { status?: TaskStatus }) => Promise<Task[]>;
 }
@@ -13,6 +14,7 @@ export interface LoadCurrentDayPlanStateDeps {
 export interface CurrentDayPlanState {
   dayPlan: DayPlan | null;
   planningContext: PlanningContext | null;
+  commitments: Commitment[];
   scheduleBlocks: ScheduleBlock[];
   unscheduled: Task[];
 }
@@ -42,6 +44,7 @@ export async function loadCurrentDayPlanState(
     return {
       dayPlan: null,
       planningContext: null,
+      commitments: [],
       scheduleBlocks: [],
       unscheduled: [],
     };
@@ -53,10 +56,18 @@ export async function loadCurrentDayPlanState(
   // old blocks, and this status guard also keeps a stale or incomplete plan
   // from being presented as generated if legacy data is inconsistent.
   if (dayPlan.status !== "generated" || !planningContext) {
-    return { dayPlan, planningContext, scheduleBlocks: [], unscheduled: [] };
+    const commitments = await deps.listCommitments(dayPlan.id);
+    return {
+      dayPlan,
+      planningContext,
+      commitments,
+      scheduleBlocks: [],
+      unscheduled: [],
+    };
   }
 
-  const [persistedScheduleBlocks, tasks] = await Promise.all([
+  const [commitments, persistedScheduleBlocks, tasks] = await Promise.all([
+    deps.listCommitments(dayPlan.id),
     deps.listScheduleBlocks(dayPlan.id),
     deps.listTasks({}),
   ]);
@@ -90,6 +101,7 @@ export async function loadCurrentDayPlanState(
   return {
     dayPlan,
     planningContext,
+    commitments,
     scheduleBlocks,
     unscheduled: openTasks.filter((task) => !plannedTaskIds.has(task.id)),
   };

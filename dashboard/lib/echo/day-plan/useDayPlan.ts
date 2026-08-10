@@ -13,6 +13,7 @@ import {
   parseJsonResponse,
 } from "@/lib/echo/client/json-response";
 import type {
+  Commitment,
   DayPlan,
   DayPlanRegenerationProposalEnvelope,
   PlanningContext,
@@ -32,9 +33,17 @@ export interface SaveDayPlanInput {
   endOfWorkTime: string;
 }
 
+export interface CreateCommitmentInput {
+  title: string;
+  startTime: string;
+  endTime: string;
+  responsibilityArea: Commitment["responsibilityArea"];
+}
+
 interface DayPlanResponse {
   dayPlan: DayPlan | null;
   planningContext: PlanningContext | null;
+  commitments: Commitment[];
   scheduleBlocks: ScheduleBlock[];
   unscheduled: Task[];
 }
@@ -60,6 +69,7 @@ export type DayPlanClientErrorKind =
   | "regenerate"
   | "stale-proposal"
   | "apply"
+  | "update-commitment"
   | "update-block";
 
 export interface DayPlanClientError {
@@ -88,6 +98,7 @@ export function useDayPlan() {
   const operationGate = useRef({ busy: false });
   const [dayPlan, setDayPlan] = useState<DayPlan | null>(null);
   const [planningContext, setPlanningContext] = useState<PlanningContext | null>(null);
+  const [commitments, setCommitments] = useState<Commitment[]>([]);
   const [scheduleBlocks, setScheduleBlocks] = useState<ScheduleBlock[]>([]);
   const [unscheduled, setUnscheduled] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -96,6 +107,7 @@ export function useDayPlan() {
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isApplyingRegeneration, setIsApplyingRegeneration] = useState(false);
   const [isUpdatingBlock, setIsUpdatingBlock] = useState(false);
+  const [isUpdatingCommitment, setIsUpdatingCommitment] = useState(false);
   const [regenerationProposal, setRegenerationProposal] =
     useState<DayPlanRegenerationProposalEnvelope | null>(null);
   const [regenerationPlanningContext, setRegenerationPlanningContext] =
@@ -115,6 +127,7 @@ export function useDayPlan() {
       const body = await responseBody<DayPlanResponse>(response);
       setDayPlan(body.dayPlan);
       setPlanningContext(body.planningContext);
+      setCommitments(body.commitments);
       setScheduleBlocks(body.scheduleBlocks);
       setUnscheduled(body.unscheduled);
     } catch (loadError) {
@@ -160,6 +173,7 @@ export function useDayPlan() {
   function applySavedCheckIn(body: DayPlanResponse) {
     setDayPlan(body.dayPlan);
     setPlanningContext(body.planningContext);
+    setCommitments(body.commitments);
     setScheduleBlocks(body.scheduleBlocks);
     setUnscheduled(body.unscheduled);
   }
@@ -328,6 +342,59 @@ export function useDayPlan() {
     return outcome.executed ? outcome.value : false;
   }
 
+  async function createCommitment(input: CreateCommitmentInput): Promise<boolean> {
+    const outcome = await runExclusiveOperation(operationGate.current, async () => {
+      setIsUpdatingCommitment(true);
+      setClientError(null);
+      clearRegenerationProposal();
+      try {
+        const response = await fetch("/api/day-plan/commitments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(input),
+        });
+        const body = await responseBody<DayPlanResponse>(response);
+        applySavedCheckIn(body);
+        return true;
+      } catch (commitmentError) {
+        setClientError({
+          kind: "update-commitment",
+          message: errorMessage(commitmentError),
+        });
+        return false;
+      } finally {
+        setIsUpdatingCommitment(false);
+      }
+    });
+    return outcome.executed ? outcome.value : false;
+  }
+
+  async function deleteCommitment(commitmentId: string): Promise<boolean> {
+    const outcome = await runExclusiveOperation(operationGate.current, async () => {
+      setIsUpdatingCommitment(true);
+      setClientError(null);
+      clearRegenerationProposal();
+      try {
+        const response = await fetch(
+          `/api/day-plan/commitments/${encodeURIComponent(commitmentId)}`,
+          { method: "DELETE" },
+        );
+        const body = await responseBody<DayPlanResponse>(response);
+        applySavedCheckIn(body);
+        return true;
+      } catch (commitmentError) {
+        setClientError({
+          kind: "update-commitment",
+          message: errorMessage(commitmentError),
+        });
+        return false;
+      } finally {
+        setIsUpdatingCommitment(false);
+      }
+    });
+    return outcome.executed ? outcome.value : false;
+  }
+
   function dismissRegenerationProposal(): void {
     invalidateStoredRegenerationProposal(clearRegenerationProposal);
   }
@@ -342,11 +409,13 @@ export function useDayPlan() {
     isGenerating ||
     isRegenerating ||
     isApplyingRegeneration ||
+    isUpdatingCommitment ||
     isUpdatingBlock;
 
   return {
     dayPlan,
     planningContext,
+    commitments,
     scheduleBlocks,
     unscheduled,
     isLoading,
@@ -355,6 +424,7 @@ export function useDayPlan() {
     isRegenerating,
     isApplyingRegeneration,
     isUpdatingBlock,
+    isUpdatingCommitment,
     isBusy,
     regenerationProposal,
     regenerationPlanningContext,
@@ -365,6 +435,8 @@ export function useDayPlan() {
     regenerateWithEcho,
     applyRegeneration,
     updateScheduleTaskBlock,
+    createCommitment,
+    deleteCommitment,
     dismissRegenerationProposal,
     checkInInputChanged,
   };

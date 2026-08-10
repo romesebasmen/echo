@@ -1,6 +1,8 @@
 import { loadCurrentDayPlanState } from "@/lib/echo/day-plan/current-state";
 import {
   getDayPlanForDate,
+  listCommitments,
+  MissingCommitmentsTableError,
   MissingDayPlansTableError,
 } from "@/lib/echo/day-plan/repository";
 import {
@@ -39,6 +41,7 @@ export async function PATCH(
 
     const state = await loadCurrentDayPlanState(toUserDateString(new Date()), {
       getDayPlanForDate,
+      listCommitments,
       listScheduleBlocks,
       listTasks,
     });
@@ -59,6 +62,7 @@ export async function PATCH(
     }
     if (
       error instanceof MissingDayPlansTableError ||
+      error instanceof MissingCommitmentsTableError ||
       error instanceof MissingScheduleBlocksTableError ||
       error instanceof MissingTasksTableError
     ) {

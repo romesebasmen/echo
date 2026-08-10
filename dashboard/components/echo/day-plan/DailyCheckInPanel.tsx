@@ -2,7 +2,11 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useDayPlan } from "@/lib/echo/day-plan/useDayPlan";
-import type { SaveDayPlanInput } from "@/lib/echo/day-plan/useDayPlan";
+import { isCheckInComplete } from "@/lib/echo/day-plan/check-in";
+import type {
+  CreateCommitmentInput,
+  SaveDayPlanInput,
+} from "@/lib/echo/day-plan/useDayPlan";
 import {
   dayPlanRegenerationErrorMessage,
   groupDayPlanRegenerationProposal,
@@ -14,18 +18,24 @@ import {
 import { selectNextStep } from "@/lib/echo/day-plan/scheduler";
 import {
   fromUserDateTimeLocalString,
+  formatUserTime,
   toUserDateString,
   toUserDateTimeLocalString,
 } from "@/lib/echo/timezone";
 import type {
+  Commitment,
   DayPlan,
   DayPlanRegenerationProposalEnvelope,
   PlanningContext,
+  ResponsibilityArea,
   ScheduleBlock,
   SleepQuality,
   Task,
 } from "@/lib/echo/types";
-import { RESPONSIBILITY_AREA_LABELS } from "@/lib/echo/types";
+import {
+  RESPONSIBILITY_AREAS,
+  RESPONSIBILITY_AREA_LABELS,
+} from "@/lib/echo/types";
 
 function defaultAvailability() {
   const now = new Date();
@@ -315,6 +325,212 @@ function CheckInForm({
   );
 }
 
+interface CommitmentsEditorProps {
+  dayPlan: DayPlan | null;
+  commitments: Commitment[];
+  isBusy: boolean;
+  isUpdating: boolean;
+  onCreate: ReturnType<typeof useDayPlan>["createCommitment"];
+  onDelete: ReturnType<typeof useDayPlan>["deleteCommitment"];
+}
+
+function defaultCommitmentTimes(dayPlan: DayPlan): {
+  startTime: string;
+  endTime: string;
+} {
+  const start = new Date(dayPlan.availableFrom);
+  const planEnd = new Date(dayPlan.endOfWorkTime);
+  const preferredEnd = new Date(start.getTime() + 60 * 60 * 1000);
+  const end = preferredEnd < planEnd ? preferredEnd : planEnd;
+  return {
+    startTime: toUserDateTimeLocalString(start),
+    endTime: toUserDateTimeLocalString(end),
+  };
+}
+
+function CommitmentsEditor({
+  dayPlan,
+  commitments,
+  isBusy,
+  isUpdating,
+  onCreate,
+  onDelete,
+}: CommitmentsEditorProps) {
+  const defaults = dayPlan ? defaultCommitmentTimes(dayPlan) : null;
+  const [title, setTitle] = useState("");
+  const [startTime, setStartTime] = useState(defaults?.startTime ?? "");
+  const [endTime, setEndTime] = useState(defaults?.endTime ?? "");
+  const [responsibilityArea, setResponsibilityArea] = useState<
+    ResponsibilityArea | ""
+  >("");
+  const [localError, setLocalError] = useState<string | null>(null);
+
+  if (!dayPlan || !isCheckInComplete(dayPlan)) {
+    return (
+      <section aria-labelledby="commitments-heading" className="mt-8 border-t border-border pt-7">
+        <h3 id="commitments-heading" className="text-base font-medium text-foreground">
+          Fixed commitments
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-muted">
+          Complete and save today’s check-in before adding classes, appointments, or other fixed
+          time.
+        </p>
+      </section>
+    );
+  }
+  const currentDayPlan = dayPlan;
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalizedTitle = title.trim();
+    const start = fromUserDateTimeLocalString(startTime);
+    const end = fromUserDateTimeLocalString(endTime);
+    if (!normalizedTitle) {
+      setLocalError("Give this commitment a short title.");
+      return;
+    }
+    if (!start || !end) {
+      setLocalError("Enter valid commitment times in America/Chicago.");
+      return;
+    }
+    if (start >= end) {
+      setLocalError("Commitment start time must be earlier than its end time.");
+      return;
+    }
+    if (
+      toUserDateString(start) !== currentDayPlan.planDate ||
+      toUserDateString(end) !== currentDayPlan.planDate
+    ) {
+      setLocalError("Commitment times must stay within today’s Chicago date.");
+      return;
+    }
+
+    setLocalError(null);
+    const input: CreateCommitmentInput = {
+      title: normalizedTitle,
+      startTime: start.toISOString(),
+      endTime: end.toISOString(),
+      responsibilityArea: responsibilityArea || null,
+    };
+    if (await onCreate(input)) {
+      setTitle("");
+    }
+  }
+
+  const inputClassName =
+    "rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition-colors focus:border-accent";
+
+  return (
+    <section aria-labelledby="commitments-heading" className="mt-8 border-t border-border pt-7">
+      <div className="flex flex-col gap-2">
+        <h3 id="commitments-heading" className="text-base font-medium text-foreground">
+          Fixed commitments
+        </h3>
+        <p className="max-w-2xl text-sm leading-6 text-muted">
+          Add time Echo must protect. Changing a commitment clears the current schedule so it can
+          be rebuilt against the new constraint.
+        </p>
+      </div>
+
+      {commitments.length > 0 && (
+        <ul className="mt-5 divide-y divide-border border-y border-border">
+          {commitments.map((commitment) => (
+            <li
+              key={commitment.id}
+              className="flex flex-wrap items-center justify-between gap-3 py-3"
+            >
+              <div className="min-w-0">
+                <p className="text-sm text-foreground">{commitment.title}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {formatUserTime(new Date(commitment.startTime))}–
+                  {formatUserTime(new Date(commitment.endTime))}
+                  {commitment.responsibilityArea
+                    ? ` · ${RESPONSIBILITY_AREA_LABELS[commitment.responsibilityArea]}`
+                    : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={isBusy}
+                aria-label={`Remove ${commitment.title} commitment`}
+                onClick={() => void onDelete(commitment.id)}
+                className="text-xs text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {isUpdating ? "Updating…" : "Remove"}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <form onSubmit={handleSubmit} className="mt-5 grid gap-4 sm:grid-cols-2">
+        <label className="flex flex-col gap-2 text-sm text-muted sm:col-span-2">
+          Commitment
+          <input
+            type="text"
+            value={title}
+            maxLength={200}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Class, appointment, meeting…"
+            className={inputClassName}
+          />
+        </label>
+        <label className="flex flex-col gap-2 text-sm text-muted">
+          Starts
+          <input
+            type="datetime-local"
+            value={startTime}
+            onChange={(event) => setStartTime(event.target.value)}
+            className={inputClassName}
+            required
+          />
+        </label>
+        <label className="flex flex-col gap-2 text-sm text-muted">
+          Ends
+          <input
+            type="datetime-local"
+            value={endTime}
+            onChange={(event) => setEndTime(event.target.value)}
+            className={inputClassName}
+            required
+          />
+        </label>
+        <label className="flex flex-col gap-2 text-sm text-muted sm:col-span-2">
+          Area (optional)
+          <select
+            value={responsibilityArea}
+            onChange={(event) =>
+              setResponsibilityArea(event.target.value as ResponsibilityArea | "")
+            }
+            className={inputClassName}
+          >
+            <option value="">No area</option>
+            {RESPONSIBILITY_AREAS.map((area) => (
+              <option key={area} value={area}>
+                {RESPONSIBILITY_AREA_LABELS[area]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {localError && (
+          <p role="alert" className="text-sm text-accent sm:col-span-2">
+            {localError}
+          </p>
+        )}
+        <div className="sm:col-span-2">
+          <button
+            type="submit"
+            disabled={isBusy}
+            className="text-sm font-medium text-accent transition-opacity hover:opacity-75 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isUpdating ? "Updating commitments…" : "Add commitment"}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+
 interface TodayPlanProps {
   dayPlan: DayPlan | null;
   scheduleBlocks: ScheduleBlock[];
@@ -587,7 +803,7 @@ export function DailyCheckInPanel() {
         <p className="text-sm text-muted">Loading today’s check-in…</p>
       ) : (
         <CheckInForm
-          key={dayPlan.dayPlan?.updatedAt ?? "new-check-in"}
+          key={dayPlan.dayPlan?.id ?? "new-check-in"}
           initialDayPlan={dayPlan.dayPlan}
           planningContext={dayPlan.planningContext}
           isBusy={dayPlan.isBusy}
@@ -598,6 +814,18 @@ export function DailyCheckInPanel() {
           onGenerate={dayPlan.saveAndGeneratePlan}
           onRegenerate={dayPlan.regenerateWithEcho}
           onCheckInChange={dayPlan.checkInInputChanged}
+        />
+      )}
+
+      {!dayPlan.isLoading && (
+        <CommitmentsEditor
+          key={dayPlan.dayPlan?.id ?? "new-commitments"}
+          dayPlan={dayPlan.dayPlan}
+          commitments={dayPlan.commitments}
+          isBusy={dayPlan.isBusy}
+          isUpdating={dayPlan.isUpdatingCommitment}
+          onCreate={dayPlan.createCommitment}
+          onDelete={dayPlan.deleteCommitment}
         />
       )}
 
