@@ -31,6 +31,20 @@ let cachedClient: Anthropic | null = null;
 
 export const TIKTOK_PACKAGE_MODEL = "claude-opus-4-8";
 export const TIKTOK_PACKAGE_MAX_RETRIES = 0;
+export const TIKTOK_PACKAGE_LIMITS = {
+  title: 120,
+  hook: 300,
+  concept: 1_000,
+  beats: 8,
+  caption: 2_200,
+  hashtags: 12,
+  shotList: 12,
+  editingNotes: 12,
+  listItem: 300,
+  hashtag: 100,
+  estimatedSeconds: 600,
+  whyItFits: 500,
+} as const;
 
 export function createAnthropicTikTokPackageClient(apiKey: string): Anthropic {
   return new Anthropic({ apiKey, maxRetries: TIKTOK_PACKAGE_MAX_RETRIES });
@@ -53,16 +67,44 @@ function getClient(): Anthropic {
 const TIKTOK_PACKAGE_JSON_SCHEMA = {
   type: "object",
   properties: {
-    title: { type: "string" },
-    hook: { type: "string" },
-    concept: { type: "string" },
-    beats: { type: "array", items: { type: "string" } },
-    caption: { type: "string" },
-    hashtags: { type: "array", items: { type: "string" } },
-    shotList: { type: "array", items: { type: "string" } },
-    editingNotes: { type: "array", items: { type: "string" } },
-    estimatedSeconds: { type: "number" },
-    whyItFits: { type: "string" },
+    title: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.title },
+    hook: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.hook },
+    concept: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.concept },
+    beats: {
+      type: "array",
+      minItems: 1,
+      maxItems: TIKTOK_PACKAGE_LIMITS.beats,
+      items: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.listItem },
+    },
+    caption: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.caption },
+    hashtags: {
+      type: "array",
+      minItems: 1,
+      maxItems: TIKTOK_PACKAGE_LIMITS.hashtags,
+      items: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.hashtag },
+    },
+    shotList: {
+      type: "array",
+      minItems: 1,
+      maxItems: TIKTOK_PACKAGE_LIMITS.shotList,
+      items: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.listItem },
+    },
+    editingNotes: {
+      type: "array",
+      minItems: 1,
+      maxItems: TIKTOK_PACKAGE_LIMITS.editingNotes,
+      items: { type: "string", minLength: 1, maxLength: TIKTOK_PACKAGE_LIMITS.listItem },
+    },
+    estimatedSeconds: {
+      type: "integer",
+      minimum: 1,
+      maximum: TIKTOK_PACKAGE_LIMITS.estimatedSeconds,
+    },
+    whyItFits: {
+      type: "string",
+      minLength: 1,
+      maxLength: TIKTOK_PACKAGE_LIMITS.whyItFits,
+    },
   },
   required: [
     "title",
@@ -84,34 +126,112 @@ const TIKTOK_PACKAGE_JSON_SCHEMA = {
 // claude-memory-extraction.ts, and the manual required-field checks in
 // claude-briefing.ts) is a hand-written type guard rather than a schema
 // library, so this follows the same pattern rather than introducing one.
-function isNonEmptyString(value: unknown): value is string {
-  return typeof value === "string" && value.trim().length > 0;
+const CREATIVE_WORK_PACKAGE_FIELDS = [
+  "title",
+  "hook",
+  "concept",
+  "beats",
+  "caption",
+  "hashtags",
+  "shotList",
+  "editingNotes",
+  "estimatedSeconds",
+  "whyItFits",
+] as const;
+
+function boundedString(value: unknown, maximumLength: number): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized && normalized.length <= maximumLength ? normalized : null;
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length > 0 && value.every(isNonEmptyString);
-}
-
-export function isValidCreativeWorkPackage(
+function boundedStringArray(
   value: unknown,
-): value is CreativeWorkPackage {
-  if (typeof value !== "object" || value === null) return false;
-  const candidate = value as Record<string, unknown>;
+  maximumItems: number,
+  maximumItemLength: number,
+): string[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > maximumItems) {
+    return null;
+  }
+  const normalized = value.map((item) => boundedString(item, maximumItemLength));
+  return normalized.every((item): item is string => item !== null) ? normalized : null;
+}
 
-  return (
-    isNonEmptyString(candidate.title) &&
-    isNonEmptyString(candidate.hook) &&
-    isNonEmptyString(candidate.concept) &&
-    isStringArray(candidate.beats) &&
-    isNonEmptyString(candidate.caption) &&
-    isStringArray(candidate.hashtags) &&
-    isStringArray(candidate.shotList) &&
-    isStringArray(candidate.editingNotes) &&
-    typeof candidate.estimatedSeconds === "number" &&
-    Number.isFinite(candidate.estimatedSeconds) &&
-    candidate.estimatedSeconds > 0 &&
-    isNonEmptyString(candidate.whyItFits)
+export function parseCreativeWorkPackage(value: unknown): CreativeWorkPackage {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new InvalidGeneratedPackageError("response did not contain an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    Object.keys(candidate).length !== CREATIVE_WORK_PACKAGE_FIELDS.length ||
+    CREATIVE_WORK_PACKAGE_FIELDS.some((field) => !(field in candidate))
+  ) {
+    throw new InvalidGeneratedPackageError("response fields did not match the package contract");
+  }
+
+  const title = boundedString(candidate.title, TIKTOK_PACKAGE_LIMITS.title);
+  const hook = boundedString(candidate.hook, TIKTOK_PACKAGE_LIMITS.hook);
+  const concept = boundedString(candidate.concept, TIKTOK_PACKAGE_LIMITS.concept);
+  const beats = boundedStringArray(
+    candidate.beats,
+    TIKTOK_PACKAGE_LIMITS.beats,
+    TIKTOK_PACKAGE_LIMITS.listItem,
   );
+  const caption = boundedString(candidate.caption, TIKTOK_PACKAGE_LIMITS.caption);
+  const hashtags = boundedStringArray(
+    candidate.hashtags,
+    TIKTOK_PACKAGE_LIMITS.hashtags,
+    TIKTOK_PACKAGE_LIMITS.hashtag,
+  );
+  const shotList = boundedStringArray(
+    candidate.shotList,
+    TIKTOK_PACKAGE_LIMITS.shotList,
+    TIKTOK_PACKAGE_LIMITS.listItem,
+  );
+  const editingNotes = boundedStringArray(
+    candidate.editingNotes,
+    TIKTOK_PACKAGE_LIMITS.editingNotes,
+    TIKTOK_PACKAGE_LIMITS.listItem,
+  );
+  const whyItFits = boundedString(candidate.whyItFits, TIKTOK_PACKAGE_LIMITS.whyItFits);
+  if (
+    !title ||
+    !hook ||
+    !concept ||
+    !beats ||
+    !caption ||
+    !hashtags ||
+    !shotList ||
+    !editingNotes ||
+    !Number.isInteger(candidate.estimatedSeconds) ||
+    (candidate.estimatedSeconds as number) < 1 ||
+    (candidate.estimatedSeconds as number) > TIKTOK_PACKAGE_LIMITS.estimatedSeconds ||
+    !whyItFits
+  ) {
+    throw new InvalidGeneratedPackageError("response values did not match the package contract");
+  }
+
+  return {
+    title,
+    hook,
+    concept,
+    beats,
+    caption,
+    hashtags,
+    shotList,
+    editingNotes,
+    estimatedSeconds: candidate.estimatedSeconds as number,
+    whyItFits,
+  };
+}
+
+export function isValidCreativeWorkPackage(value: unknown): value is CreativeWorkPackage {
+  try {
+    parseCreativeWorkPackage(value);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // Rough chars-per-token heuristic for English text — not a real tokenizer.
@@ -217,9 +337,5 @@ export async function generateTikTokPackage(
     throw new InvalidGeneratedPackageError("response was not valid JSON");
   }
 
-  if (!isValidCreativeWorkPackage(parsed)) {
-    throw new InvalidGeneratedPackageError("response did not match the expected package shape");
-  }
-
-  return parsed;
+  return parseCreativeWorkPackage(parsed);
 }
