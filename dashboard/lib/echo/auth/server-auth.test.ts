@@ -30,8 +30,13 @@ function getConfiguration() {
   return { accessPassword: PASSWORD, sessionSecret: SECRET };
 }
 
+async function allowValidPassword(passwordValid: boolean): Promise<boolean> {
+  return passwordValid;
+}
+
 test("the correct password creates a signed HttpOnly session", async () => {
   const response = await handleEchoLogin(loginRequest(PASSWORD), {
+    registerLoginAttempt: allowValidPassword,
     getConfiguration,
     now: () => NOW,
     isProduction: false,
@@ -52,6 +57,7 @@ test("the correct password creates a signed HttpOnly session", async () => {
 
 test("production sessions use Secure cookies", async () => {
   const response = await handleEchoLogin(loginRequest(PASSWORD), {
+    registerLoginAttempt: allowValidPassword,
     getConfiguration,
     now: () => NOW,
     isProduction: true,
@@ -62,6 +68,7 @@ test("production sessions use Secure cookies", async () => {
 
 test("an incorrect password fails without creating a session", async () => {
   const response = await handleEchoLogin(loginRequest("wrong"), {
+    registerLoginAttempt: allowValidPassword,
     getConfiguration,
     now: () => NOW,
   });
@@ -76,6 +83,7 @@ test("an incorrect password fails without creating a session", async () => {
 
 test("a missing password fails without creating a session", async () => {
   const response = await handleEchoLogin(loginRequest(), {
+    registerLoginAttempt: allowValidPassword,
     getConfiguration,
     now: () => NOW,
   });
@@ -87,10 +95,70 @@ test("a missing password fails without creating a session", async () => {
 test("missing auth configuration fails closed with the same login response", async () => {
   let reported = false;
   const response = await handleEchoLogin(loginRequest(PASSWORD), {
+    registerLoginAttempt: allowValidPassword,
     getConfiguration: () => {
       throw new EchoAuthConfigurationError();
     },
     reportConfigurationError: () => {
+      reported = true;
+    },
+  });
+
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    "http://localhost:3000/login?error=invalid",
+  );
+  assert.equal(response.cookies.get(ECHO_SESSION_COOKIE), undefined);
+  assert.equal(reported, true);
+});
+
+test("an active throttle denies even a correct password without creating a session", async () => {
+  let registeredPasswordValidity: boolean | null = null;
+  const response = await handleEchoLogin(loginRequest(PASSWORD), {
+    getConfiguration,
+    registerLoginAttempt: async (passwordValid) => {
+      registeredPasswordValidity = passwordValid;
+      return false;
+    },
+  });
+
+  assert.equal(registeredPasswordValidity, true);
+  assert.equal(response.status, 303);
+  assert.equal(
+    response.headers.get("location"),
+    "http://localhost:3000/login?error=invalid",
+  );
+  assert.equal(response.cookies.get(ECHO_SESSION_COOKIE), undefined);
+});
+
+test("incorrect and missing passwords are registered as failed attempts", async () => {
+  const attempts: boolean[] = [];
+  const registerLoginAttempt = async (passwordValid: boolean) => {
+    attempts.push(passwordValid);
+    return false;
+  };
+
+  await handleEchoLogin(loginRequest("wrong"), {
+    getConfiguration,
+    registerLoginAttempt,
+  });
+  await handleEchoLogin(loginRequest(), {
+    getConfiguration,
+    registerLoginAttempt,
+  });
+
+  assert.deepEqual(attempts, [false, false]);
+});
+
+test("login protection failure fails closed with the generic response", async () => {
+  let reported = false;
+  const response = await handleEchoLogin(loginRequest(PASSWORD), {
+    getConfiguration,
+    registerLoginAttempt: async () => {
+      throw new Error("database details");
+    },
+    reportLoginProtectionError: () => {
       reported = true;
     },
   });

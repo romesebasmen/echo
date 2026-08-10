@@ -68,15 +68,17 @@ function loginFailureResponse(request: Request): NextResponse {
 }
 
 export type LoginHandlerDependencies = {
+  registerLoginAttempt: (passwordValid: boolean) => Promise<boolean>;
   getConfiguration?: () => EchoAuthConfiguration;
   now?: () => Date;
   isProduction?: boolean;
   reportConfigurationError?: () => void;
+  reportLoginProtectionError?: () => void;
 };
 
 export async function handleEchoLogin(
   request: Request,
-  dependencies: LoginHandlerDependencies = {},
+  dependencies: LoginHandlerDependencies,
 ): Promise<NextResponse> {
   let password = "";
   try {
@@ -100,7 +102,19 @@ export async function handleEchoLogin(
     throw error;
   }
 
-  if (!password || !verifyEchoAccessPassword(password, configuration.accessPassword)) {
+  const passwordValid =
+    Boolean(password) &&
+    verifyEchoAccessPassword(password, configuration.accessPassword);
+
+  let loginAllowed = false;
+  try {
+    loginAllowed = await dependencies.registerLoginAttempt(passwordValid);
+  } catch {
+    dependencies.reportLoginProtectionError?.();
+    return loginFailureResponse(request);
+  }
+
+  if (!passwordValid || !loginAllowed) {
     return loginFailureResponse(request);
   }
 
