@@ -8,6 +8,10 @@ import type {
   MemoryConfidence,
   MemoryImportance,
 } from "@/lib/echo/types";
+import {
+  MAX_MEMORY_DESCRIPTION_LENGTH,
+  MAX_MEMORY_TITLE_LENGTH,
+} from "@/lib/echo/types";
 
 const CATEGORIES: MemoryCategory[] = [
   "identity",
@@ -93,6 +97,7 @@ export function MemoriesPanel() {
                       value={editTitle}
                       onChange={(event) => setEditTitle(event.target.value)}
                       required
+                      maxLength={MAX_MEMORY_TITLE_LENGTH}
                       className={inputClassName}
                     />
                   </div>
@@ -105,6 +110,7 @@ export function MemoriesPanel() {
                       value={editDescription}
                       onChange={(event) => setEditDescription(event.target.value)}
                       required
+                      maxLength={MAX_MEMORY_DESCRIPTION_LENGTH}
                       rows={3}
                       className={inputClassName}
                     />

@@ -21,6 +21,9 @@ export type MemorySourceType = "chat" | "thought" | "import" | "manual";
 // information contradicts it — the old row stays for history.
 export type MemoryStatus = "active" | "superseded" | "archived";
 
+export const MAX_MEMORY_TITLE_LENGTH = 100;
+export const MAX_MEMORY_DESCRIPTION_LENGTH = 500;
+
 export interface Memory {
   id: string;
   userId: string;

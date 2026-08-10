@@ -5,6 +5,10 @@ import type {
   MemoryConfidence,
   MemoryImportance,
 } from "../types/index.ts";
+import {
+  MAX_MEMORY_DESCRIPTION_LENGTH,
+  MAX_MEMORY_TITLE_LENGTH,
+} from "../types/memory.ts";
 
 // SERVER-ONLY. Import this only from Route Handlers / server-only modules.
 // ANTHROPIC_API_KEY is read here and must never reach the browser bundle.
@@ -27,8 +31,7 @@ const CONFIDENCE_LEVELS: MemoryConfidence[] = ["low", "medium", "high"];
 export const MEMORY_EXTRACTION_MODEL = "claude-opus-4-8";
 export const MEMORY_EXTRACTION_MAX_RETRIES = 0;
 export const MAX_MEMORY_OPERATIONS_PER_EXTRACTION = 10;
-export const MAX_MEMORY_TITLE_LENGTH = 100;
-export const MAX_MEMORY_DESCRIPTION_LENGTH = 500;
+export { MAX_MEMORY_DESCRIPTION_LENGTH, MAX_MEMORY_TITLE_LENGTH };
 
 export class InvalidMemoryExtractionResponseError extends Error {
   constructor(reason: string) {

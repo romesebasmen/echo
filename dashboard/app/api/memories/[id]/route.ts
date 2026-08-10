@@ -3,33 +3,11 @@ import {
   MissingMemoriesTableError,
   updateMemory,
 } from "@/lib/echo/memories/repository";
-import type {
-  MemoryCategory,
-  MemoryConfidence,
-  MemoryImportance,
-  MemoryStatus,
-} from "@/lib/echo/types";
-
-const CATEGORIES: MemoryCategory[] = [
-  "identity",
-  "preference",
-  "goal",
-  "project",
-  "relationship",
-  "routine",
-  "creator-style",
-  "constraint",
-  "other",
-];
-
-const LEVELS: (MemoryImportance | MemoryConfidence)[] = ["low", "medium", "high"];
-const STATUSES: MemoryStatus[] = ["active", "superseded", "archived"];
-
-function pickEnum<T extends string>(value: unknown, allowed: T[]): T | undefined {
-  return typeof value === "string" && (allowed as string[]).includes(value)
-    ? (value as T)
-    : undefined;
-}
+import {
+  InvalidMemoryRequestError,
+  parseMemoryUpdateRequest,
+} from "@/lib/echo/memories/request";
+import { formatError } from "@/lib/echo/errors";
 
 export async function PATCH(
   request: Request,
@@ -37,36 +15,20 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
-
-    const title =
-      typeof body.title === "string" && body.title.trim()
-        ? body.title.trim()
-        : undefined;
-    const description =
-      typeof body.description === "string" && body.description.trim()
-        ? body.description.trim()
-        : undefined;
-    const category = pickEnum(body.category, CATEGORIES);
-    const importance = pickEnum(body.importance, LEVELS) as MemoryImportance | undefined;
-    const confidence = pickEnum(body.confidence, LEVELS) as MemoryConfidence | undefined;
-    const status = pickEnum(body.status, STATUSES);
-
-    if (!title && !description && !category && !importance && !confidence && !status) {
-      return Response.json({ error: "No valid fields to update." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
-
-    const memory = await updateMemory(id, {
-      title,
-      description,
-      category,
-      importance,
-      confidence,
-      status,
-    });
+    const input = parseMemoryUpdateRequest(body);
+    const memory = await updateMemory(id, input);
 
     return Response.json({ memory });
   } catch (error) {
+    if (error instanceof InvalidMemoryRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof MissingMemoriesTableError) {
       console.error("PATCH /api/memories/[id] failed: memories table is missing.");
       return Response.json(
@@ -78,7 +40,7 @@ export async function PATCH(
       );
     }
 
-    console.error("PATCH /api/memories/[id] failed:", error);
+    console.error("PATCH /api/memories/[id] failed:", formatError(error));
     return Response.json({ error: "Could not update memory." }, { status: 500 });
   }
 }
