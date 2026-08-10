@@ -23,6 +23,12 @@ import {
   parseChatPostRequest,
 } from "@/lib/echo/chat/request";
 import type { Memory } from "@/lib/echo/types";
+import {
+  AiOperationInProgressError,
+  AiOperationLeaseUnavailableError,
+  createAiOperationKey,
+} from "@/lib/echo/ai/operation-lease";
+import { runWithAiOperationLease } from "@/lib/echo/ai/operation-lease-server";
 
 const RECENT_HISTORY_LIMIT = 20;
 const RELEVANT_MEMORY_LIMIT = 20;
@@ -46,7 +52,10 @@ export async function GET() {
     });
   } catch (error) {
     console.error("GET /api/chat failed:", formatError(error));
-    return Response.json({ error: "Could not load conversation." }, { status: 500 });
+    return Response.json(
+      { error: "Could not load conversation." },
+      { status: 500 },
+    );
   }
 }
 
@@ -58,7 +67,10 @@ export async function POST(request: Request) {
     try {
       body = await request.json();
     } catch {
-      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
+      return Response.json(
+        { error: "Request body must be valid JSON." },
+        { status: 400 },
+      );
     }
     const { content } = parseChatPostRequest(body);
 
@@ -72,91 +84,136 @@ export async function POST(request: Request) {
     }
     lockedConversationId = conversationId;
 
-    // The new message is passed separately to the provider, so it is not
-    // included in this history query.
-    const recentHistory = await getRecentMessages(RECENT_HISTORY_LIMIT);
+    const exchange = await runWithAiOperationLease(
+      createAiOperationKey("chat", conversationId),
+      async () => {
+        // The new message is passed separately to the provider, so it is not
+        // included in this history query.
+        const recentHistory = await getRecentMessages(RECENT_HISTORY_LIMIT);
 
-    let relevantMemories: Memory[];
-    try {
-      relevantMemories = await getRelevantMemories(RELEVANT_MEMORY_LIMIT);
-    } catch (memoryError) {
-      console.error(
-        "Fetching relevant memories failed, continuing without them:",
-        formatError(memoryError),
-      );
-      relevantMemories = [];
-    }
-
-    const replyText = await getClaudeReply(recentHistory, content, relevantMemories);
-
-    // One PostgreSQL insert statement keeps the exchange atomic: a provider
-    // failure writes neither side, and a database failure cannot leave only
-    // one half of a successfully generated exchange.
-    const { data: messageRows, error: messageError } = await supabase
-      .from("messages")
-      .insert([
-        { conversation_id: conversationId, role: fromRole("user"), content },
-        {
-          conversation_id: conversationId,
-          role: fromRole("echo"),
-          content: replyText,
-        },
-      ])
-      .select("*");
-
-    if (messageError) throw messageError;
-    const userRow = messageRows?.find((row) => row.role === fromRole("user"));
-    const echoRow = messageRows?.find((row) => row.role === fromRole("echo"));
-    if (!userRow || !echoRow) {
-      throw new Error("The saved chat exchange was incomplete.");
-    }
-
-    const { error: touchError } = await supabase
-      .from("conversations")
-      .update({ updated_at: new Date().toISOString() })
-      .eq("id", conversationId);
-
-    if (touchError) {
-      // The exchange is already safely persisted. Conversation recency is
-      // useful metadata, but its failure must not encourage a duplicate retry.
-      console.error("Updating conversation recency failed:", formatError(touchError));
-    }
-
-    // Memory extraction runs after the response is sent — its failure must
-    // never affect the chat reply the user already received.
-    after(async () => {
-      try {
-        const appliedCount = await extractAndApplyMemories({
-          userMessage: content,
-          echoReply: replyText,
-          sourceMessageId: userRow.id as string,
-          sourceType: "chat",
-        });
-        if (appliedCount > 0) {
-          console.log(`Memory extraction applied ${appliedCount} operation(s).`);
+        let relevantMemories: Memory[];
+        try {
+          relevantMemories = await getRelevantMemories(RELEVANT_MEMORY_LIMIT);
+        } catch (memoryError) {
+          console.error(
+            "Fetching relevant memories failed, continuing without them:",
+            formatError(memoryError),
+          );
+          relevantMemories = [];
         }
-      } catch (extractionError) {
-        console.error("Memory extraction failed:", formatError(extractionError));
-      }
-    });
 
-    return Response.json(
-      { userMessage: toMessage(userRow), echoMessage: toMessage(echoRow) },
-      { status: 201 },
+        const replyText = await getClaudeReply(
+          recentHistory,
+          content,
+          relevantMemories,
+        );
+
+        // One PostgreSQL insert statement keeps the exchange atomic: a provider
+        // failure writes neither side, and a database failure cannot leave only
+        // one half of a successfully generated exchange.
+        const { data: messageRows, error: messageError } = await supabase
+          .from("messages")
+          .insert([
+            {
+              conversation_id: conversationId,
+              role: fromRole("user"),
+              content,
+            },
+            {
+              conversation_id: conversationId,
+              role: fromRole("echo"),
+              content: replyText,
+            },
+          ])
+          .select("*");
+
+        if (messageError) throw messageError;
+        const userRow = messageRows?.find(
+          (row) => row.role === fromRole("user"),
+        );
+        const echoRow = messageRows?.find(
+          (row) => row.role === fromRole("echo"),
+        );
+        if (!userRow || !echoRow) {
+          throw new Error("The saved chat exchange was incomplete.");
+        }
+
+        const { error: touchError } = await supabase
+          .from("conversations")
+          .update({ updated_at: new Date().toISOString() })
+          .eq("id", conversationId);
+
+        if (touchError) {
+          // The exchange is already safely persisted. Conversation recency is
+          // useful metadata, but its failure must not encourage a duplicate retry.
+          console.error(
+            "Updating conversation recency failed:",
+            formatError(touchError),
+          );
+        }
+
+        // Memory extraction runs after the response is sent — its failure must
+        // never affect the chat reply the user already received.
+        after(async () => {
+          try {
+            const appliedCount = await extractAndApplyMemories({
+              userMessage: content,
+              echoReply: replyText,
+              sourceMessageId: userRow.id as string,
+              sourceType: "chat",
+            });
+            if (appliedCount > 0) {
+              console.log(
+                `Memory extraction applied ${appliedCount} operation(s).`,
+              );
+            }
+          } catch (extractionError) {
+            console.error(
+              "Memory extraction failed:",
+              formatError(extractionError),
+            );
+          }
+        });
+
+        return {
+          userMessage: toMessage(userRow),
+          echoMessage: toMessage(echoRow),
+        };
+      },
     );
-  } catch (error) {
-    console.error("POST /api/chat failed:", formatError(error));
 
+    return Response.json(exchange, { status: 201 });
+  } catch (error) {
     if (error instanceof InvalidChatRequestError) {
       return Response.json({ error: error.message }, { status: 400 });
     }
+
+    if (error instanceof AiOperationInProgressError) {
+      return Response.json(
+        { error: "Echo is already responding to this conversation." },
+        { status: 409 },
+      );
+    }
+
+    if (error instanceof AiOperationLeaseUnavailableError) {
+      console.error("POST /api/chat failed:", formatError(error));
+      return Response.json(
+        { error: "Echo couldn't safely coordinate this response." },
+        { status: 503 },
+      );
+    }
+
+    console.error("POST /api/chat failed:", formatError(error));
 
     if (
       error instanceof ChatProviderUnavailableError ||
       error instanceof InvalidChatProviderResponseError
     ) {
       return Response.json(
-        { error: "Echo couldn't respond because its AI provider is unavailable." },
+        {
+          error:
+            "Echo couldn't respond because its AI provider is unavailable.",
+        },
         { status: 502 },
       );
     }
@@ -184,6 +241,9 @@ export async function DELETE() {
     return Response.json({ ok: true });
   } catch (error) {
     console.error("DELETE /api/chat failed:", formatError(error));
-    return Response.json({ error: "Could not clear conversation." }, { status: 500 });
+    return Response.json(
+      { error: "Could not clear conversation." },
+      { status: 500 },
+    );
   }
 }

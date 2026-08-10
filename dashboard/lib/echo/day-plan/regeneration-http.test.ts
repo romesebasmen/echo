@@ -26,6 +26,10 @@ import {
 } from "./regeneration-proposal.ts";
 import { MissingDailyCheckInMigrationError } from "./migration-error.ts";
 import type { Commitment, DayPlan } from "../types/day-plan.ts";
+import {
+  AiOperationInProgressError,
+  AiOperationLeaseUnavailableError,
+} from "../ai/operation-lease.ts";
 
 const EXPECTED_CHECK_IN = "2026-07-23T12:55:00Z";
 
@@ -110,7 +114,9 @@ function fakeProposeDeps(
   } satisfies ProposeDayPlanRegenerationHttpDeps;
 }
 
-function fakeApplyDeps(overrides: Partial<ApplyDayPlanRegenerationHttpDeps> = {}) {
+function fakeApplyDeps(
+  overrides: Partial<ApplyDayPlanRegenerationHttpDeps> = {},
+) {
   return {
     apply: async () => generatedResult(),
     logError: () => undefined,
@@ -157,7 +163,9 @@ for (const body of [
       }),
     );
 
-    const response = await handler(jsonRequest("/api/day-plan/regenerate", body));
+    const response = await handler(
+      jsonRequest("/api/day-plan/regenerate", body),
+    );
 
     assert.equal(response.status, 400);
     assert.equal(calls, 0);
@@ -260,7 +268,11 @@ test("apply POST passes only the strict authoritative proposal fields", async ()
   assert.deepEqual(await response.json(), generatedResult());
 });
 
-for (const extraField of ["taskSummaries", "planningContext", "maxScheduledTaskMinutes"]) {
+for (const extraField of [
+  "taskSummaries",
+  "planningContext",
+  "maxScheduledTaskMinutes",
+]) {
   test(`apply POST rejects client field ${extraField}`, async () => {
     let calls = 0;
     const handler = createApplyDayPlanRegenerationHandler(
@@ -336,9 +348,25 @@ test("apply POST rejects a malformed input fingerprint", async () => {
   assert.equal(calls, 0);
 });
 
-const invalidProposalCause = new InvalidDayPlanRegenerationProposalError("invalid output");
+const invalidProposalCause = new InvalidDayPlanRegenerationProposalError(
+  "invalid output",
+);
 const mappedErrors: Array<{ name: string; error: Error; status: number }> = [
-  { name: "missing plan", error: new DayPlanNotFoundError("2026-07-23"), status: 404 },
+  {
+    name: "AI operation already in progress",
+    error: new AiOperationInProgressError(),
+    status: 429,
+  },
+  {
+    name: "AI operation coordination unavailable",
+    error: new AiOperationLeaseUnavailableError("acquire", "PGRST202"),
+    status: 503,
+  },
+  {
+    name: "missing plan",
+    error: new DayPlanNotFoundError("2026-07-23"),
+    status: 404,
+  },
   {
     name: "incomplete check-in",
     error: new IncompleteCheckInError("2026-07-23", ["stress"]),
@@ -351,12 +379,16 @@ const mappedErrors: Array<{ name: string; error: Error; status: number }> = [
   },
   {
     name: "provider unavailable",
-    error: new DayPlanRecommendationProviderUnavailableError(new Error("offline")),
+    error: new DayPlanRecommendationProviderUnavailableError(
+      new Error("offline"),
+    ),
     status: 502,
   },
   {
     name: "invalid model output",
-    error: new InvalidDayPlanRecommendationProviderOutputError(invalidProposalCause),
+    error: new InvalidDayPlanRecommendationProviderOutputError(
+      invalidProposalCause,
+    ),
     status: 502,
   },
   {
@@ -379,7 +411,11 @@ const mappedErrors: Array<{ name: string; error: Error; status: number }> = [
     error: new MissingDailyCheckInMigrationError(),
     status: 500,
   },
-  { name: "repository failure", error: new Error("database unavailable"), status: 500 },
+  {
+    name: "repository failure",
+    error: new Error("database unavailable"),
+    status: 500,
+  },
 ];
 
 for (const mapped of mappedErrors) {

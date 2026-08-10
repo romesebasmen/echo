@@ -13,12 +13,16 @@ import {
 } from "@/lib/echo/daily-briefing/repository";
 import type { DailyBriefing } from "@/lib/echo/types";
 import { runBriefingGenerationSingleFlight } from "@/lib/echo/daily-briefing/generation-single-flight";
+import { createAiOperationKey } from "@/lib/echo/ai/operation-lease";
+import { runWithAiOperationLease } from "@/lib/echo/ai/operation-lease-server";
 
 const RECENT_MESSAGE_LIMIT = 20;
 const RECENT_THOUGHT_LIMIT = 10;
 const RELEVANT_MEMORY_LIMIT = 15;
 
-async function buildAndSaveBriefing(briefingDate: string): Promise<DailyBriefing> {
+async function buildAndSaveBriefing(
+  briefingDate: string,
+): Promise<DailyBriefing> {
   const [
     recentMessages,
     recentThoughts,
@@ -98,13 +102,19 @@ export async function getTodaysBriefing(): Promise<DailyBriefing> {
   const cached = await getBriefingForDate(briefingDate);
   if (cached) return cached;
   return runBriefingGenerationSingleFlight(briefingDate, () =>
-    buildAndSaveBriefing(briefingDate),
+    runWithAiOperationLease(
+      createAiOperationKey("briefing", briefingDate),
+      () => buildAndSaveBriefing(briefingDate),
+    ),
   );
 }
 
 export async function regenerateTodaysBriefing(): Promise<DailyBriefing> {
   const briefingDate = todayDateString();
   return runBriefingGenerationSingleFlight(briefingDate, () =>
-    buildAndSaveBriefing(briefingDate),
+    runWithAiOperationLease(
+      createAiOperationKey("briefing", briefingDate),
+      () => buildAndSaveBriefing(briefingDate),
+    ),
   );
 }

@@ -1,9 +1,6 @@
-// In-memory, single-process guard against concurrent generation requests for
-// the same creative work (e.g. a double-click before the button disables).
-// Module-scoped Set survives across requests within one running server
-// process — sufficient for this single-user app with no background jobs or
-// multi-instance deployment. Not a substitute for a DB-level lock if this
-// ever runs across multiple instances.
+// Fast single-process guard against a double-click before the button disables.
+// The generation route also holds a database-backed AI operation lease around
+// provider work and persistence so multi-instance concurrency remains safe.
 const inFlightGenerations = new Set<string>();
 
 export function tryAcquireGenerationLock(id: string): boolean {

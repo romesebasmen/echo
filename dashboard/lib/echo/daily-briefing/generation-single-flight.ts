@@ -1,7 +1,6 @@
-// Single-process request coalescing for the current single-user deployment.
-// Concurrent GET/refresh requests for one Chicago day share one generation
-// promise, preventing duplicate paid calls from double effects or clicks.
-// A database-backed lease would be required for multi-instance deployment.
+// Fast single-process request coalescing: concurrent requests for one Chicago
+// day share one promise. The generator also holds a database-backed AI
+// operation lease, which is the cross-instance paid-call boundary.
 const inFlightByDate = new Map<string, Promise<unknown>>();
 
 export function runBriefingGenerationSingleFlight<T>(

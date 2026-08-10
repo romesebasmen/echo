@@ -15,6 +15,10 @@ import {
 import { InvalidDayPlanRegenerationProposalError } from "./regeneration-proposal.ts";
 import { MissingDailyCheckInMigrationError } from "./migration-error.ts";
 import { formatError } from "../errors.ts";
+import {
+  AiOperationInProgressError,
+  AiOperationLeaseUnavailableError,
+} from "../ai/operation-lease.ts";
 
 export class MalformedDayPlanRegenerationRequestError extends Error {
   constructor(reason: string) {
@@ -24,7 +28,9 @@ export class MalformedDayPlanRegenerationRequestError extends Error {
 }
 
 export interface ProposeDayPlanRegenerationHttpDeps {
-  propose: (expectedCheckInCompletedAt: string) => Promise<ProposeDayPlanRegenerationResult>;
+  propose: (
+    expectedCheckInCompletedAt: string,
+  ) => Promise<ProposeDayPlanRegenerationResult>;
   logError?: (message: string) => void;
 }
 
@@ -37,21 +43,32 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function hasExactKeys(value: Record<string, unknown>, expected: readonly string[]): boolean {
+function hasExactKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
   const keys = Object.keys(value);
-  return keys.length === expected.length && keys.every((key) => expected.includes(key));
+  return (
+    keys.length === expected.length &&
+    keys.every((key) => expected.includes(key))
+  );
 }
 
 async function requestJson(request: Request): Promise<unknown> {
   try {
     return await request.json();
   } catch {
-    throw new MalformedDayPlanRegenerationRequestError("body must be valid JSON");
+    throw new MalformedDayPlanRegenerationRequestError(
+      "body must be valid JSON",
+    );
   }
 }
 
 function parseProposeRequest(value: unknown): string {
-  if (!isRecord(value) || !hasExactKeys(value, ["expectedCheckInCompletedAt"])) {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ["expectedCheckInCompletedAt"])
+  ) {
     throw new MalformedDayPlanRegenerationRequestError(
       "body must contain exactly expectedCheckInCompletedAt",
     );
@@ -80,10 +97,14 @@ function parseApplyRequest(value: unknown): Record<string, unknown> {
     );
   }
   if (value.schemaVersion !== 1) {
-    throw new MalformedDayPlanRegenerationRequestError("schemaVersion must be 1");
+    throw new MalformedDayPlanRegenerationRequestError(
+      "schemaVersion must be 1",
+    );
   }
   if (!isRecord(value.recommendation)) {
-    throw new MalformedDayPlanRegenerationRequestError("recommendation must be an object");
+    throw new MalformedDayPlanRegenerationRequestError(
+      "recommendation must be an object",
+    );
   }
   if (
     typeof value.inputFingerprint !== "string" ||
@@ -115,6 +136,18 @@ function errorResponse(
   error: unknown,
   logError: (message: string) => void,
 ): Response {
+  if (error instanceof AiOperationInProgressError) {
+    // Keep this distinct from stale proposal/check-in conflicts: the client
+    // intentionally treats 409 as stale and clears its review state.
+    return Response.json({ error: error.message }, { status: 429 });
+  }
+  if (error instanceof AiOperationLeaseUnavailableError) {
+    logError(`${routeLabel} failed: ${formatError(error)}`);
+    return Response.json(
+      { error: "Echo couldn't safely coordinate AI regeneration." },
+      { status: 503 },
+    );
+  }
   if (
     error instanceof MalformedDayPlanRegenerationRequestError ||
     error instanceof InvalidDayPlanRegenerationApplicationError ||
@@ -146,7 +179,10 @@ function errorResponse(
   }
 
   logError(`${routeLabel} failed: ${formatError(error)}`);
-  return Response.json({ error: "Could not regenerate today's plan." }, { status: 500 });
+  return Response.json(
+    { error: "Could not regenerate today's plan." },
+    { status: 500 },
+  );
 }
 
 export function createProposeDayPlanRegenerationHandler(
@@ -154,7 +190,9 @@ export function createProposeDayPlanRegenerationHandler(
 ): (request: Request) => Promise<Response> {
   return async function POST(request: Request): Promise<Response> {
     try {
-      const expectedCheckInCompletedAt = parseProposeRequest(await requestJson(request));
+      const expectedCheckInCompletedAt = parseProposeRequest(
+        await requestJson(request),
+      );
       const result = await deps.propose(expectedCheckInCompletedAt);
       return Response.json(result);
     } catch (error) {

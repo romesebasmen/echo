@@ -14,20 +14,29 @@ import {
 } from "@/lib/echo/day-plan/schedule-blocks-repository";
 import { listTasks } from "@/lib/echo/tasks/repository";
 import { toUserDateString } from "@/lib/echo/timezone";
+import { createAiOperationKey } from "@/lib/echo/ai/operation-lease";
+import { runWithAiOperationLease } from "@/lib/echo/ai/operation-lease-server";
 
 // SERVER-ONLY route wiring. The Claude provider remains lazy and is only
 // invoked by proposeDayPlanRegenerationWithContext when open tasks exist.
 
-export function proposeTodaysDayPlanRegeneration(expectedCheckInCompletedAt: string) {
-  return proposeDayPlanRegenerationWithContext(
-    toUserDateString(new Date()),
-    expectedCheckInCompletedAt,
-    {
-      getDayPlanForDate,
-      listTasks,
-      listCommitments,
-      provider: claudeDayPlanRecommendationProvider,
-    },
+export function proposeTodaysDayPlanRegeneration(
+  expectedCheckInCompletedAt: string,
+) {
+  const planDate = toUserDateString(new Date());
+  return runWithAiOperationLease(
+    createAiOperationKey("day-plan-regeneration", planDate),
+    () =>
+      proposeDayPlanRegenerationWithContext(
+        planDate,
+        expectedCheckInCompletedAt,
+        {
+          getDayPlanForDate,
+          listTasks,
+          listCommitments,
+          provider: claudeDayPlanRecommendationProvider,
+        },
+      ),
   );
 }
 
@@ -36,7 +45,11 @@ export function applyTodaysDayPlanRegeneration(request: unknown) {
     getDayPlanForDate,
     listTasks,
     listCommitments,
-    async persistGeneratedSchedule(dayPlanId, expectedCheckInCompletedAt, blocks) {
+    async persistGeneratedSchedule(
+      dayPlanId,
+      expectedCheckInCompletedAt,
+      blocks,
+    ) {
       try {
         return await persistGeneratedSchedule(
           dayPlanId,

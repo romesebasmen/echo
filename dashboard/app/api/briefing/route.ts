@@ -8,8 +8,27 @@ import {
   InvalidGeneratedBriefingError,
 } from "@/lib/echo/ai/claude-briefing";
 import { formatError } from "@/lib/echo/errors";
+import {
+  AiOperationInProgressError,
+  AiOperationLeaseUnavailableError,
+} from "@/lib/echo/ai/operation-lease";
 
 function handleBriefingError(routeLabel: string, error: unknown) {
+  if (error instanceof AiOperationInProgressError) {
+    return Response.json(
+      { error: "Echo is already preparing this briefing." },
+      { status: 409 },
+    );
+  }
+
+  if (error instanceof AiOperationLeaseUnavailableError) {
+    console.error(`${routeLabel} failed:`, formatError(error));
+    return Response.json(
+      { error: "Echo couldn't safely coordinate briefing generation." },
+      { status: 503 },
+    );
+  }
+
   if (error instanceof MissingBriefingsTableError) {
     console.error(`${routeLabel} failed: daily_briefings table is missing.`);
     return Response.json(
@@ -27,13 +46,19 @@ function handleBriefingError(routeLabel: string, error: unknown) {
   ) {
     console.error(`${routeLabel} failed:`, formatError(error));
     return Response.json(
-      { error: "Echo couldn't prepare the briefing because its AI provider is unavailable." },
+      {
+        error:
+          "Echo couldn't prepare the briefing because its AI provider is unavailable.",
+      },
       { status: 502 },
     );
   }
 
   console.error(`${routeLabel} failed:`, formatError(error));
-  return Response.json({ error: "Could not load today's briefing." }, { status: 500 });
+  return Response.json(
+    { error: "Could not load today's briefing." },
+    { status: 500 },
+  );
 }
 
 export async function GET() {

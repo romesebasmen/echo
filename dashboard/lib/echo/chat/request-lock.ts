@@ -1,7 +1,6 @@
-// Single-process serialization for the current single-user deployment. This
-// prevents rapid duplicate submissions from creating concurrent paid model
-// calls or replies based on the same stale conversation history. A durable
-// distributed lock would be required before running multiple server instances.
+// Fast single-process rejection for duplicate submissions. The route also
+// holds a database-backed AI operation lease, which provides the authoritative
+// cross-instance boundary around provider work and message persistence.
 const inFlightConversations = new Set<string>();
 
 export function tryAcquireChatRequestLock(conversationId: string): boolean {
