@@ -1,9 +1,13 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { CreativeWork, CreativeWorkStatus } from "@/lib/echo/types";
 import {
   hasResponseField,
   parseJsonResponse,
 } from "@/lib/echo/client/json-response";
+import {
+  runExclusiveClientOperation,
+  runExclusiveKeyedClientOperation,
+} from "@/lib/echo/client/operation-gate";
 
 interface CreativeWorksResponse {
   creativeWorks: CreativeWork[];
@@ -40,6 +44,8 @@ async function parseCreativeWorkResponse(
 }
 
 export function useCreativeWorks() {
+  const createGate = useRef({ busy: false });
+  const activeWorkKeys = useRef(new Set<string>());
   const [creativeWorks, setCreativeWorks] = useState<CreativeWork[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -47,6 +53,7 @@ export function useCreativeWorks() {
   // disable every other row, and so a second click on the same button
   // before the first request resolves is impossible.
   const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -71,34 +78,72 @@ export function useCreativeWorks() {
     load();
   }, [load]);
 
-  async function createFromThought(thoughtId: string): Promise<boolean> {
-    setError(null);
-    setIsCreating(true);
-    try {
-      const response = await fetch("/api/creative-works", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ thoughtId }),
-      });
-      const body = await parseCreativeWorkResponse(response);
-      setCreativeWorks((previous) => {
-        const alreadyListed = previous.some((work) => work.id === body.creativeWork.id);
-        return alreadyListed
-          ? previous.map((work) => (work.id === body.creativeWork.id ? body.creativeWork : work))
-          : [body.creativeWork, ...previous];
-      });
-      return true;
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Could not create a TikTok idea. Please try again.",
-      );
-      return false;
-    } finally {
-      setIsCreating(false);
-    }
+  async function runWorkOperation(
+    id: string,
+    operation: () => Promise<boolean>,
+  ): Promise<boolean> {
+    const result = await runExclusiveKeyedClientOperation(
+      activeWorkKeys.current,
+      id,
+      async () => {
+        setPendingIds((previous) => new Set(previous).add(id));
+        try {
+          return await operation();
+        } finally {
+          setPendingIds((previous) => {
+            const next = new Set(previous);
+            next.delete(id);
+            return next;
+          });
+        }
+      },
+    );
+    return result.executed ? result.value : false;
   }
 
-  async function generatePackage(id: string, force = false): Promise<boolean> {
+  async function createFromThought(thoughtId: string): Promise<boolean> {
+    const result = await runExclusiveClientOperation(
+      createGate.current,
+      async () => {
+        setError(null);
+        setIsCreating(true);
+        try {
+          const response = await fetch("/api/creative-works", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ thoughtId }),
+          });
+          const body = await parseCreativeWorkResponse(response);
+          setCreativeWorks((previous) => {
+            const alreadyListed = previous.some(
+              (work) => work.id === body.creativeWork.id,
+            );
+            return alreadyListed
+              ? previous.map((work) =>
+                  work.id === body.creativeWork.id ? body.creativeWork : work,
+                )
+              : [body.creativeWork, ...previous];
+          });
+          return true;
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not create a TikTok idea. Please try again.",
+          );
+          return false;
+        } finally {
+          setIsCreating(false);
+        }
+      },
+    );
+    return result.executed ? result.value : false;
+  }
+
+  async function performGeneratePackage(
+    id: string,
+    force = false,
+  ): Promise<boolean> {
     if (generatingIds.has(id)) {
       // Already pending for this work — refuse to submit a second request
       // from this client, on top of the server-side lock.
@@ -133,7 +178,14 @@ export function useCreativeWorks() {
     }
   }
 
-  async function updateStatus(id: string, status: CreativeWorkStatus): Promise<boolean> {
+  async function generatePackage(id: string, force = false): Promise<boolean> {
+    return runWorkOperation(id, () => performGeneratePackage(id, force));
+  }
+
+  async function performUpdateStatus(
+    id: string,
+    status: CreativeWorkStatus,
+  ): Promise<boolean> {
     setError(null);
     try {
       const response = await fetch(`/api/creative-works/${id}`, {
@@ -152,7 +204,17 @@ export function useCreativeWorks() {
     }
   }
 
-  async function updateReflection(id: string, reflection: string): Promise<boolean> {
+  async function updateStatus(
+    id: string,
+    status: CreativeWorkStatus,
+  ): Promise<boolean> {
+    return runWorkOperation(id, () => performUpdateStatus(id, status));
+  }
+
+  async function performUpdateReflection(
+    id: string,
+    reflection: string,
+  ): Promise<boolean> {
     setError(null);
     try {
       const response = await fetch(`/api/creative-works/${id}`, {
@@ -173,11 +235,21 @@ export function useCreativeWorks() {
     }
   }
 
+  async function updateReflection(
+    id: string,
+    reflection: string,
+  ): Promise<boolean> {
+    return runWorkOperation(id, () =>
+      performUpdateReflection(id, reflection),
+    );
+  }
+
   return {
     creativeWorks,
     isLoading,
     isCreating,
     isGenerating: (id: string) => generatingIds.has(id),
+    isBusy: (id: string) => pendingIds.has(id),
     error,
     createFromThought,
     generatePackage,

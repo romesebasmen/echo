@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runExclusiveClientOperation } from "./operation-gate.ts";
+import {
+  runExclusiveClientOperation,
+  runExclusiveKeyedClientOperation,
+} from "./operation-gate.ts";
 
 test("a second operation cannot enter before the active one settles", async () => {
   const gate = { busy: false };
@@ -40,4 +43,37 @@ test("the gate is released when an operation fails", async () => {
 
   const next = await runExclusiveClientOperation(gate, async () => "next");
   assert.deepEqual(next, { executed: true, value: "next" });
+});
+
+test("keyed operations serialize the same item without blocking another item", async () => {
+  const activeKeys = new Set<string>();
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  const first = runExclusiveKeyedClientOperation(
+    activeKeys,
+    "work:first",
+    async () => {
+      await pending;
+      return "first";
+    },
+  );
+  const duplicate = await runExclusiveKeyedClientOperation(
+    activeKeys,
+    "work:first",
+    async () => "duplicate",
+  );
+  const unrelated = await runExclusiveKeyedClientOperation(
+    activeKeys,
+    "work:second",
+    async () => "second",
+  );
+
+  assert.deepEqual(duplicate, { executed: false });
+  assert.deepEqual(unrelated, { executed: true, value: "second" });
+  release();
+  assert.deepEqual(await first, { executed: true, value: "first" });
+  assert.deepEqual([...activeKeys], []);
 });

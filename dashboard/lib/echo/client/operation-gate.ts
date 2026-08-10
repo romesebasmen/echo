@@ -21,3 +21,17 @@ export async function runExclusiveClientOperation<T>(
     gate.busy = false;
   }
 }
+
+export async function runExclusiveKeyedClientOperation<T>(
+  activeKeys: Set<string>,
+  key: string,
+  operation: () => Promise<T>,
+): Promise<OperationResult<T>> {
+  if (activeKeys.has(key)) return { executed: false };
+  activeKeys.add(key);
+  try {
+    return { executed: true, value: await operation() };
+  } finally {
+    activeKeys.delete(key);
+  }
+}

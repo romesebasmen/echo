@@ -17,6 +17,7 @@ const NEXT_STATUS: Partial<
 
 interface CreativeWorkListItemProps {
   work: CreativeWork;
+  isBusy: boolean;
   isGenerating: boolean;
   onGenerate: (id: string, force: boolean) => void;
   onUpdateStatus: (id: string, status: CreativeWorkStatus) => void;
@@ -25,6 +26,7 @@ interface CreativeWorkListItemProps {
 
 export function CreativeWorkListItem({
   work,
+  isBusy,
   isGenerating,
   onGenerate,
   onUpdateStatus,
@@ -60,7 +62,7 @@ export function CreativeWorkListItem({
           <button
             type="button"
             onClick={() => onGenerate(work.id, false)}
-            disabled={isGenerating}
+            disabled={isBusy}
             className="rounded-md border border-foreground px-4 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isGenerating ? "Generating…" : "Generate package"}
@@ -71,7 +73,7 @@ export function CreativeWorkListItem({
           <button
             type="button"
             onClick={() => onGenerate(work.id, true)}
-            disabled={isGenerating}
+            disabled={isBusy}
             className="rounded-md px-4 py-1.5 text-sm font-medium text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {isGenerating ? "Regenerating…" : "Regenerate package"}
@@ -82,7 +84,8 @@ export function CreativeWorkListItem({
           <button
             type="button"
             onClick={() => onUpdateStatus(work.id, nextStep.status)}
-            className="rounded-md px-4 py-1.5 text-sm font-medium text-muted transition-colors hover:text-accent"
+            disabled={isBusy}
+            className="rounded-md px-4 py-1.5 text-sm font-medium text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
           >
             {nextStep.label}
           </button>
@@ -100,12 +103,14 @@ export function CreativeWorkListItem({
             onChange={(event) => setReflectionDraft(event.target.value)}
             maxLength={MAX_CREATIVE_WORK_REFLECTION_LENGTH}
             rows={2}
+            disabled={isBusy}
             placeholder="How did it go?"
-            className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent"
+            className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent disabled:cursor-not-allowed disabled:opacity-60"
           />
           <button
             type="submit"
-            className="self-start rounded-md border border-foreground px-4 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background"
+            disabled={isBusy}
+            className="self-start rounded-md border border-foreground px-4 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-60"
           >
             Save reflection
           </button>

@@ -9,6 +9,7 @@ export default function TikTokPage() {
     creativeWorks,
     isLoading,
     error,
+    isBusy,
     isGenerating,
     generatePackage,
     updateStatus,
@@ -40,6 +41,7 @@ export default function TikTokPage() {
             <CreativeWorkListItem
               key={work.id}
               work={work}
+              isBusy={isBusy(work.id)}
               isGenerating={isGenerating(work.id)}
               onGenerate={generatePackage}
               onUpdateStatus={updateStatus}
