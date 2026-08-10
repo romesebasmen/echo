@@ -1,7 +1,25 @@
-import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
-import type { ChatMessage, MessageRole } from "@/lib/echo/types";
+import { getSupabaseServerClient } from "../supabase/server-client.ts";
+import type { ServiceRoleRpcCaller } from "../supabase/service-role-client.ts";
+import type { ChatMessage, MessageRole } from "../types/index.ts";
 
-const USER_ID = "sebastian";
+export class ConversationBootstrapPersistenceError extends Error {
+  readonly code: string | null;
+
+  constructor(code: string | null = null) {
+    super("Echo could not load its conversation.");
+    this.name = "ConversationBootstrapPersistenceError";
+    this.code = code;
+  }
+}
+
+export class MissingConversationBootstrapMigrationError extends Error {
+  constructor() {
+    super(
+      "The conversation-bootstrap migration has not been applied. Apply the version-controlled Supabase migrations, then try again.",
+    );
+    this.name = "MissingConversationBootstrapMigrationError";
+  }
+}
 
 interface MessageRow {
   id: string;
@@ -32,27 +50,39 @@ export function fromRole(role: MessageRole): string {
 }
 
 export async function getOrCreateConversationId(): Promise<string> {
-  const supabase = getSupabaseServerClient();
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return getOrCreateConversationIdWithRpc(callSupabaseServiceRoleRpc);
+}
 
-  const { data: existing, error: findError } = await supabase
-    .from("conversations")
-    .select("id")
-    .eq("user_id", USER_ID)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (findError) throw findError;
-  if (existing) return existing.id as string;
-
-  const { data: created, error: createError } = await supabase
-    .from("conversations")
-    .insert({ user_id: USER_ID, title: "Echo chat" })
-    .select("id")
-    .single();
-
-  if (createError) throw createError;
-  return created.id as string;
+export async function getOrCreateConversationIdWithRpc(
+  callRpc: ServiceRoleRpcCaller,
+): Promise<string> {
+  const { data, error } = await callRpc("get_or_create_echo_conversation", {});
+  if (error) {
+    const message = error.message ?? "";
+    if (
+      (error.code === "PGRST202" || error.code === "42883") &&
+      message.toLowerCase().includes("get_or_create_echo_conversation")
+    ) {
+      throw new MissingConversationBootstrapMigrationError();
+    }
+    const code =
+      typeof error.code === "string" && /^[A-Z0-9]{2,10}$/.test(error.code)
+        ? error.code
+        : null;
+    throw new ConversationBootstrapPersistenceError(code);
+  }
+  if (
+    typeof data !== "string" ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      data,
+    )
+  ) {
+    throw new ConversationBootstrapPersistenceError();
+  }
+  return data;
 }
 
 export async function getRecentMessages(limit: number): Promise<ChatMessage[]> {
