@@ -29,10 +29,24 @@ export interface GeneratedBriefingContent {
   nextAction: string;
 }
 
+export class InvalidGeneratedBriefingError extends Error {
+  constructor(reason: string) {
+    super(`Generated briefing failed validation: ${reason}`);
+    this.name = "InvalidGeneratedBriefingError";
+  }
+}
+
 let cachedClient: Anthropic | null = null;
 
 export const BRIEFING_MODEL = "claude-opus-4-8";
 export const BRIEFING_MAX_RETRIES = 0;
+export const BRIEFING_CONTENT_LIMITS = {
+  greeting: 200,
+  whatChanged: 1_000,
+  patternText: 1_000,
+  bestRecommendation: 1_000,
+  nextAction: 500,
+} as const;
 
 export function createAnthropicBriefingClient(apiKey: string): Anthropic {
   return new Anthropic({ apiKey, maxRetries: BRIEFING_MAX_RETRIES });
@@ -55,19 +69,39 @@ function getClient(): Anthropic {
 const BRIEFING_JSON_SCHEMA = {
   type: "object",
   properties: {
-    greeting: { type: "string" },
-    whatChanged: { type: "string" },
+    greeting: {
+      type: "string",
+      minLength: 1,
+      maxLength: BRIEFING_CONTENT_LIMITS.greeting,
+    },
+    whatChanged: {
+      type: "string",
+      minLength: 1,
+      maxLength: BRIEFING_CONTENT_LIMITS.whatChanged,
+    },
     patternNoticed: {
       type: "object",
       properties: {
-        text: { type: "string" },
+        text: {
+          type: "string",
+          minLength: 1,
+          maxLength: BRIEFING_CONTENT_LIMITS.patternText,
+        },
         kind: { type: "string", enum: ["pattern", "hypothesis"] },
       },
       required: ["text", "kind"],
       additionalProperties: false,
     },
-    bestRecommendation: { type: "string" },
-    nextAction: { type: "string" },
+    bestRecommendation: {
+      type: "string",
+      minLength: 1,
+      maxLength: BRIEFING_CONTENT_LIMITS.bestRecommendation,
+    },
+    nextAction: {
+      type: "string",
+      minLength: 1,
+      maxLength: BRIEFING_CONTENT_LIMITS.nextAction,
+    },
   },
   required: [
     "greeting",
@@ -78,6 +112,89 @@ const BRIEFING_JSON_SCHEMA = {
   ],
   additionalProperties: false,
 } as const;
+
+const BRIEFING_FIELDS = [
+  "greeting",
+  "whatChanged",
+  "patternNoticed",
+  "bestRecommendation",
+  "nextAction",
+] as const;
+
+function boundedBriefingText(
+  value: unknown,
+  maximumLength: number,
+  field: string,
+): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new InvalidGeneratedBriefingError(`${field} must be a non-empty string`);
+  }
+  const normalized = value.trim();
+  if (normalized.length > maximumLength) {
+    throw new InvalidGeneratedBriefingError(`${field} exceeded its length limit`);
+  }
+  return normalized;
+}
+
+export function parseGeneratedBriefingContent(value: unknown): GeneratedBriefingContent {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new InvalidGeneratedBriefingError("response did not contain an object");
+  }
+  const candidate = value as Record<string, unknown>;
+  if (
+    Object.keys(candidate).length !== BRIEFING_FIELDS.length ||
+    BRIEFING_FIELDS.some((field) => !(field in candidate))
+  ) {
+    throw new InvalidGeneratedBriefingError("response fields did not match the contract");
+  }
+  if (
+    typeof candidate.patternNoticed !== "object" ||
+    candidate.patternNoticed === null ||
+    Array.isArray(candidate.patternNoticed)
+  ) {
+    throw new InvalidGeneratedBriefingError("patternNoticed did not contain an object");
+  }
+  const pattern = candidate.patternNoticed as Record<string, unknown>;
+  if (
+    Object.keys(pattern).length !== 2 ||
+    !("text" in pattern) ||
+    !("kind" in pattern) ||
+    (pattern.kind !== "pattern" && pattern.kind !== "hypothesis")
+  ) {
+    throw new InvalidGeneratedBriefingError("patternNoticed did not match the contract");
+  }
+
+  return {
+    greeting: boundedBriefingText(
+      candidate.greeting,
+      BRIEFING_CONTENT_LIMITS.greeting,
+      "greeting",
+    ),
+    whatChanged: boundedBriefingText(
+      candidate.whatChanged,
+      BRIEFING_CONTENT_LIMITS.whatChanged,
+      "whatChanged",
+    ),
+    patternNoticed: {
+      text: boundedBriefingText(
+        pattern.text,
+        BRIEFING_CONTENT_LIMITS.patternText,
+        "patternNoticed.text",
+      ),
+      kind: pattern.kind,
+    },
+    bestRecommendation: boundedBriefingText(
+      candidate.bestRecommendation,
+      BRIEFING_CONTENT_LIMITS.bestRecommendation,
+      "bestRecommendation",
+    ),
+    nextAction: boundedBriefingText(
+      candidate.nextAction,
+      BRIEFING_CONTENT_LIMITS.nextAction,
+      "nextAction",
+    ),
+  };
+}
 
 export async function generateBriefingContent(
   input: BriefingGenerationInput,
@@ -99,20 +216,13 @@ export async function generateBriefingContent(
     throw new Error("Briefing response contained no text content.");
   }
 
-  const parsed = JSON.parse(textBlock.text) as Partial<GeneratedBriefingContent>;
-
-  if (
-    !parsed.greeting ||
-    !parsed.whatChanged ||
-    !parsed.patternNoticed?.text ||
-    !parsed.patternNoticed?.kind ||
-    !parsed.bestRecommendation ||
-    !parsed.nextAction
-  ) {
-    throw new Error("Briefing response was missing required fields.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(textBlock.text);
+  } catch {
+    throw new InvalidGeneratedBriefingError("response was not valid JSON");
   }
-
-  return parsed as GeneratedBriefingContent;
+  return parseGeneratedBriefingContent(parsed);
 }
 
 function buildUserPrompt(input: BriefingGenerationInput): string {
