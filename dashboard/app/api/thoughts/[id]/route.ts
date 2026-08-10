@@ -8,6 +8,11 @@ import {
   InvalidThoughtRequestError,
   parseThoughtWriteRequest,
 } from "@/lib/echo/thoughts/request";
+import {
+  ThoughtInUseError,
+  throwIfThoughtInUse,
+} from "@/lib/echo/thoughts/persistence-error";
+import { formatError } from "@/lib/echo/errors";
 
 const USER_ID = "sebastian";
 
@@ -85,11 +90,17 @@ export async function DELETE(
       .eq("id", id)
       .eq("user_id", USER_ID);
 
-    if (error) throw error;
+    if (error) {
+      throwIfThoughtInUse(error);
+      throw error;
+    }
 
     return Response.json({ ok: true });
   } catch (error) {
-    console.error("DELETE /api/thoughts/[id] failed:", error);
+    if (error instanceof ThoughtInUseError) {
+      return Response.json({ error: error.message }, { status: 409 });
+    }
+    console.error("DELETE /api/thoughts/[id] failed:", formatError(error));
     return Response.json({ error: "Could not delete thought." }, { status: 500 });
   }
 }

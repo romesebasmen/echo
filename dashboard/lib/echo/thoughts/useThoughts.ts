@@ -19,6 +19,10 @@ interface ThoughtResponse {
   thought: Thought;
 }
 
+interface DeleteThoughtResponse {
+  ok: boolean;
+}
+
 const GENERIC_ERROR = "Something went wrong. Please try again.";
 
 async function parseThoughtsResponse(response: Response): Promise<ThoughtsResponse> {
@@ -36,6 +40,16 @@ async function parseThoughtResponse(response: Response): Promise<ThoughtResponse
       hasResponseField(body, "thought") &&
       typeof body.thought === "object" &&
       body.thought !== null,
+  });
+}
+
+async function parseDeleteThoughtResponse(
+  response: Response,
+): Promise<DeleteThoughtResponse> {
+  return parseJsonResponse(response, {
+    fallbackMessage: "Could not delete your thought. Please try again.",
+    isSuccessBody: (body): body is DeleteThoughtResponse =>
+      hasResponseField(body, "ok") && body.ok === true,
   });
 }
 
@@ -116,10 +130,14 @@ export function useThoughts() {
 
     try {
       const response = await fetch(`/api/thoughts/${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(GENERIC_ERROR);
-    } catch {
+      await parseDeleteThoughtResponse(response);
+    } catch (err) {
       setThoughts(previousThoughts);
-      setError("Could not delete your thought. Please try again.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Could not delete your thought. Please try again.",
+      );
     }
   }
 
