@@ -64,6 +64,7 @@ test("every application API family rejects unauthenticated requests", async () =
     ["/api/creative-works/work-id", "PATCH"],
     ["/api/creative-works/work-id/generate", "POST"],
     ["/api/day-plan", "PUT"],
+    ["/api/day-plan/blocks/block-id", "PATCH"],
     ["/api/day-plan/generate", "POST"],
     ["/api/day-plan/regenerate", "POST"],
     ["/api/day-plan/regenerate/apply", "POST"],

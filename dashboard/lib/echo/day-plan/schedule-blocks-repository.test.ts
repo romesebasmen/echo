@@ -1,6 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { persistGeneratedScheduleWithRpc } from "./schedule-blocks-repository.ts";
+import {
+  InvalidScheduleBlockTransitionError,
+  MissingScheduleBlockActionMigrationError,
+  persistGeneratedScheduleWithRpc,
+  ScheduleBlockNotFoundError,
+  transitionScheduleTaskBlockWithRpc,
+} from "./schedule-blocks-repository.ts";
 import type { DraftScheduleBlock } from "./scheduler.ts";
 
 test("persistGeneratedSchedule delegates atomic replacement through an injected RPC caller", async () => {
@@ -81,4 +87,83 @@ test("persistGeneratedSchedule delegates atomic replacement through an injected 
   ]);
   assert.equal(result.dayPlan.status, "generated");
   assert.equal(result.scheduleBlocks[0]?.id, "block-1");
+});
+
+test("task block transitions use the service-role-only RPC and map its row", async () => {
+  let captured: { functionName: string; parameters: Record<string, unknown> } | null = null;
+  const result = await transitionScheduleTaskBlockWithRpc(
+    "block-1",
+    "completed",
+    async (functionName, parameters) => {
+      captured = { functionName, parameters };
+      return {
+        data: {
+          schedule_block: {
+            id: "block-1",
+            day_plan_id: "plan-1",
+            source_type: "task",
+            source_id: "task-1",
+            title: "Write proposal",
+            responsibility_area: "echo",
+            start_time: "2026-08-09T14:00:00Z",
+            end_time: "2026-08-09T15:00:00Z",
+            status: "completed",
+            order_index: 0,
+            created_at: "2026-08-09T13:00:00Z",
+            updated_at: "2026-08-09T14:30:00Z",
+          },
+        },
+        error: null,
+      };
+    },
+  );
+
+  assert.deepEqual(captured, {
+    functionName: "transition_day_plan_task_block",
+    parameters: { p_block_id: "block-1", p_status: "completed" },
+  });
+  assert.equal(result.status, "completed");
+  assert.equal(result.sourceId, "task-1");
+});
+
+test("task block transition maps stable database errors", async () => {
+  const cases = [
+    {
+      message: "ECHO_SCHEDULE_BLOCK_NOT_FOUND",
+      errorType: ScheduleBlockNotFoundError,
+    },
+    {
+      message: "ECHO_SCHEDULE_BLOCK_NOT_CURRENT",
+      errorType: InvalidScheduleBlockTransitionError,
+    },
+    {
+      message: "ECHO_SCHEDULE_BLOCK_NOT_TASK",
+      errorType: InvalidScheduleBlockTransitionError,
+    },
+  ];
+
+  for (const item of cases) {
+    await assert.rejects(
+      () =>
+        transitionScheduleTaskBlockWithRpc("block-1", "skipped", async () => ({
+          data: null,
+          error: { code: "P0001", message: item.message },
+        })),
+      item.errorType,
+    );
+  }
+});
+
+test("a missing task-block transition RPC produces a useful migration error", async () => {
+  await assert.rejects(
+    () =>
+      transitionScheduleTaskBlockWithRpc("block-1", "completed", async () => ({
+        data: null,
+        error: {
+          code: "PGRST202",
+          message: "Could not find transition_day_plan_task_block in the schema cache",
+        },
+      })),
+    MissingScheduleBlockActionMigrationError,
+  );
 });

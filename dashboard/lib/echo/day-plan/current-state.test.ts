@@ -168,3 +168,19 @@ test("only task blocks remove tasks from the unscheduled list", async () => {
 
   assert.deepEqual(result.unscheduled.map((item) => item.id), [task.id]);
 });
+
+test("a skipped task block returns its still-open task to unscheduled", async () => {
+  const task = fakeTask("skipped-task");
+  const result = await loadCurrentDayPlanState(
+    "2026-08-09",
+    depsFor({
+      dayPlan: fakeDayPlan(),
+      blocks: [
+        { ...fakeBlock("skipped", "task", task.id), status: "skipped" },
+      ],
+      tasks: [task],
+    }),
+  );
+
+  assert.deepEqual(result.unscheduled.map((item) => item.id), [task.id]);
+});

@@ -62,7 +62,12 @@ export async function loadCurrentDayPlanState(
   ]);
   const plannedTaskIds = new Set(
     scheduleBlocks
-      .filter((block) => block.sourceType === "task" && block.sourceId !== null)
+      .filter(
+        (block) =>
+          block.sourceType === "task" &&
+          block.status !== "skipped" &&
+          block.sourceId !== null,
+      )
       .map((block) => block.sourceId as string),
   );
 

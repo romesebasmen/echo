@@ -319,9 +319,19 @@ interface TodayPlanProps {
   dayPlan: DayPlan | null;
   scheduleBlocks: ScheduleBlock[];
   unscheduled: Task[];
+  isBusy: boolean;
+  isUpdatingBlock: boolean;
+  onUpdateTaskBlock: ReturnType<typeof useDayPlan>["updateScheduleTaskBlock"];
 }
 
-function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
+function TodayPlan({
+  dayPlan,
+  scheduleBlocks,
+  unscheduled,
+  isBusy,
+  isUpdatingBlock,
+  onUpdateTaskBlock,
+}: TodayPlanProps) {
   const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
@@ -374,6 +384,7 @@ function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
           {scheduleBlocks.map((block) => {
             const presentation = presentScheduleBlock(block);
             const isBreak = block.sourceType === "break";
+            const isFinished = block.status !== "scheduled";
             return (
               <li
                 key={block.id}
@@ -392,13 +403,42 @@ function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
                   <p className="text-xs uppercase tracking-[0.14em] text-muted">
                     {presentation.kindLabel}
                   </p>
-                  <p className={`mt-1 text-sm ${isBreak ? "text-muted" : "text-foreground"}`}>
+                  <p
+                    className={`mt-1 text-sm ${
+                      isBreak || isFinished ? "text-muted" : "text-foreground"
+                    } ${block.status === "completed" ? "line-through" : ""}`}
+                  >
                     {block.title}
                   </p>
                   {block.responsibilityArea && (
                     <p className="mt-1 text-xs text-muted">
                       {RESPONSIBILITY_AREA_LABELS[block.responsibilityArea]}
                     </p>
+                  )}
+                  {block.status !== "scheduled" && (
+                    <p className="mt-1 text-xs capitalize text-muted">{block.status}</p>
+                  )}
+                  {block.sourceType === "task" && block.status === "scheduled" && (
+                    <div className="mt-3 flex flex-wrap gap-4">
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        aria-label={`Mark ${block.title} complete`}
+                        onClick={() => void onUpdateTaskBlock(block.id, "completed")}
+                        className="text-xs font-medium text-accent transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {isUpdatingBlock ? "Updating…" : "Done"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        aria-label={`Skip ${block.title} for today`}
+                        onClick={() => void onUpdateTaskBlock(block.id, "skipped")}
+                        className="text-xs text-muted transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Skip for today
+                      </button>
+                    </div>
                   )}
                 </div>
               </li>
@@ -565,6 +605,9 @@ export function DailyCheckInPanel() {
         dayPlan={dayPlan.dayPlan}
         scheduleBlocks={dayPlan.scheduleBlocks}
         unscheduled={dayPlan.unscheduled}
+        isBusy={dayPlan.isBusy}
+        isUpdatingBlock={dayPlan.isUpdatingBlock}
+        onUpdateTaskBlock={dayPlan.updateScheduleTaskBlock}
       />
 
       {dayPlan.regenerationProposal && (

@@ -10,6 +10,7 @@ import type { DraftScheduleBlock } from "./scheduler.ts";
 import { mapDayPlanRow, type DayPlanRow } from "./repository.ts";
 import { throwIfDailyCheckInMigrationMissing } from "./migration-error.ts";
 import type { ServiceRoleRpcCaller } from "../supabase/service-role-client.ts";
+import type { ScheduleTaskBlockAction } from "./schedule-block-action.ts";
 
 // No USER_ID filtering here — schedule_blocks is scoped indirectly through
 // day_plan_id (day_plans.user_id), the same pattern commitments uses.
@@ -30,6 +31,29 @@ export class CheckInChangedDuringGenerationError extends Error {
   }
 }
 
+export class ScheduleBlockNotFoundError extends Error {
+  constructor() {
+    super("Schedule block not found.");
+    this.name = "ScheduleBlockNotFoundError";
+  }
+}
+
+export class InvalidScheduleBlockTransitionError extends Error {
+  constructor(message = "This schedule block can no longer be changed.") {
+    super(message);
+    this.name = "InvalidScheduleBlockTransitionError";
+  }
+}
+
+export class MissingScheduleBlockActionMigrationError extends Error {
+  constructor() {
+    super(
+      "The schedule-block action migration has not been applied. Apply the version-controlled Supabase migrations, then try again.",
+    );
+    this.name = "MissingScheduleBlockActionMigrationError";
+  }
+}
+
 interface ScheduleBlockRow {
   id: string;
   day_plan_id: string;
@@ -43,6 +67,10 @@ interface ScheduleBlockRow {
   order_index: number;
   created_at: string;
   updated_at: string;
+}
+
+interface TransitionScheduleBlockResultRow {
+  schedule_block: ScheduleBlockRow;
 }
 
 interface PostgrestErrorLike {
@@ -90,6 +118,67 @@ export async function listScheduleBlocks(dayPlanId: string): Promise<ScheduleBlo
   }
 
   return (data ?? []).map(toScheduleBlock);
+}
+
+export async function transitionScheduleTaskBlock(
+  blockId: string,
+  status: ScheduleTaskBlockAction,
+): Promise<ScheduleBlock> {
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return transitionScheduleTaskBlockWithRpc(
+    blockId,
+    status,
+    callSupabaseServiceRoleRpc,
+  );
+}
+
+export async function transitionScheduleTaskBlockWithRpc(
+  blockId: string,
+  status: ScheduleTaskBlockAction,
+  callRpc: ServiceRoleRpcCaller,
+): Promise<ScheduleBlock> {
+  const { data, error } = await callRpc("transition_day_plan_task_block", {
+    p_block_id: blockId,
+    p_status: status,
+  });
+
+  if (error) {
+    const message = error.message ?? "";
+    if (
+      (error.code === "PGRST202" || error.code === "42883") &&
+      message.toLowerCase().includes("transition_day_plan_task_block")
+    ) {
+      throw new MissingScheduleBlockActionMigrationError();
+    }
+    if (error.code === "P0001" && message.includes("ECHO_SCHEDULE_BLOCK_NOT_FOUND")) {
+      throw new ScheduleBlockNotFoundError();
+    }
+    if (error.code === "P0001" && message.includes("ECHO_SCHEDULE_BLOCK_NOT_CURRENT")) {
+      throw new InvalidScheduleBlockTransitionError(
+        "Only task blocks in today's generated plan can be changed.",
+      );
+    }
+    if (
+      error.code === "P0001" &&
+      (message.includes("ECHO_SCHEDULE_BLOCK_NOT_TASK") ||
+        message.includes("ECHO_INVALID_SCHEDULE_BLOCK_TRANSITION") ||
+        message.includes("ECHO_SCHEDULE_BLOCK_TASK_NOT_FOUND"))
+    ) {
+      throw new InvalidScheduleBlockTransitionError();
+    }
+    throw error;
+  }
+
+  const result = data as TransitionScheduleBlockResultRow | null;
+  if (!result?.schedule_block) {
+    throw new InvalidScheduleBlockTransitionError(
+      "Echo could not confirm the schedule block update.",
+    );
+  }
+
+  return toScheduleBlock(result.schedule_block);
 }
 
 // Deletes every existing block for the day plan and inserts the freshly

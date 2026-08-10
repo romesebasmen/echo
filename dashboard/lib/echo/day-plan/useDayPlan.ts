@@ -20,6 +20,7 @@ import type {
   SleepQuality,
   Task,
 } from "@/lib/echo/types";
+import type { ScheduleTaskBlockAction } from "./schedule-block-action";
 
 export interface SaveDayPlanInput {
   energy: number;
@@ -58,7 +59,8 @@ export type DayPlanClientErrorKind =
   | "build"
   | "regenerate"
   | "stale-proposal"
-  | "apply";
+  | "apply"
+  | "update-block";
 
 export interface DayPlanClientError {
   kind: DayPlanClientErrorKind;
@@ -93,6 +95,7 @@ export function useDayPlan() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
   const [isApplyingRegeneration, setIsApplyingRegeneration] = useState(false);
+  const [isUpdatingBlock, setIsUpdatingBlock] = useState(false);
   const [regenerationProposal, setRegenerationProposal] =
     useState<DayPlanRegenerationProposalEnvelope | null>(null);
   const [regenerationPlanningContext, setRegenerationPlanningContext] =
@@ -299,6 +302,32 @@ export function useDayPlan() {
     return outcome.executed ? outcome.value : false;
   }
 
+  async function updateScheduleTaskBlock(
+    blockId: string,
+    status: ScheduleTaskBlockAction,
+  ): Promise<boolean> {
+    const outcome = await runExclusiveOperation(operationGate.current, async () => {
+      setIsUpdatingBlock(true);
+      setClientError(null);
+      try {
+        const response = await fetch(`/api/day-plan/blocks/${encodeURIComponent(blockId)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        });
+        const body = await responseBody<DayPlanResponse>(response);
+        applySavedCheckIn(body);
+        return true;
+      } catch (updateError) {
+        setClientError({ kind: "update-block", message: errorMessage(updateError) });
+        return false;
+      } finally {
+        setIsUpdatingBlock(false);
+      }
+    });
+    return outcome.executed ? outcome.value : false;
+  }
+
   function dismissRegenerationProposal(): void {
     invalidateStoredRegenerationProposal(clearRegenerationProposal);
   }
@@ -309,7 +338,11 @@ export function useDayPlan() {
   }
 
   const isBusy =
-    isSaving || isGenerating || isRegenerating || isApplyingRegeneration;
+    isSaving ||
+    isGenerating ||
+    isRegenerating ||
+    isApplyingRegeneration ||
+    isUpdatingBlock;
 
   return {
     dayPlan,
@@ -321,6 +354,7 @@ export function useDayPlan() {
     isGenerating,
     isRegenerating,
     isApplyingRegeneration,
+    isUpdatingBlock,
     isBusy,
     regenerationProposal,
     regenerationPlanningContext,
@@ -330,6 +364,7 @@ export function useDayPlan() {
     saveAndGeneratePlan,
     regenerateWithEcho,
     applyRegeneration,
+    updateScheduleTaskBlock,
     dismissRegenerationProposal,
     checkInInputChanged,
   };
