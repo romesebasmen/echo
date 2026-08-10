@@ -1,10 +1,10 @@
 import {
-  createCreativeWork,
-  findCreativeWorkByOrigin,
+  CreativeWorkOriginNotFoundError,
+  getOrCreateThoughtCreativeWork,
   listCreativeWorks,
+  MissingCreativeWorkOpportunityMigrationError,
   MissingCreativeWorksTableError,
 } from "@/lib/echo/creative-works/repository";
-import { getThoughtById } from "@/lib/echo/thoughts/repository";
 import { formatError } from "@/lib/echo/errors";
 import {
   InvalidCreativeWorkRequestError,
@@ -26,6 +26,13 @@ const STATUSES: CreativeWorkStatus[] = [
 ];
 
 function handleCreativeWorksError(routeLabel: string, error: unknown) {
+  if (error instanceof MissingCreativeWorkOpportunityMigrationError) {
+    console.error(
+      `${routeLabel} failed: atomic creative-work opportunity migration is missing.`,
+    );
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+
   if (error instanceof MissingCreativeWorksTableError) {
     console.error(`${routeLabel} failed: creative_works table is missing.`);
     return Response.json(
@@ -66,38 +73,29 @@ export async function POST(request: Request) {
     try {
       body = await request.json();
     } catch {
-      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
+      return Response.json(
+        { error: "Request body must be valid JSON." },
+        { status: 400 },
+      );
     }
     const { thoughtId } = parseCreativeWorkCreateRequest(body);
-
-    // Ownership check: getThoughtById is scoped to the current user
-    // internally (the app's single hardcoded user) — a thought that doesn't
-    // belong to them, or doesn't exist, resolves to null here. userId is
-    // never read from the request body.
-    const thought = await getThoughtById(thoughtId);
-    if (!thought) {
-      return Response.json({ error: "Thought not found." }, { status: 404 });
-    }
-
     const platform: Platform = "TikTok";
 
-    // Duplicate prevention: same origin thought + platform returns the
-    // existing row instead of creating another one.
-    const existing = await findCreativeWorkByOrigin("thought", thoughtId, platform);
-    if (existing) {
-      return Response.json({ creativeWork: existing, created: false });
-    }
+    // Source ownership/existence and duplicate prevention live in one
+    // database transaction. Concurrent tabs therefore receive the same work
+    // instead of creating parallel Creator Loop items.
+    const result = await getOrCreateThoughtCreativeWork(thoughtId, platform);
 
-    const creativeWork = await createCreativeWork({
-      originType: "thought",
-      originId: thoughtId,
-      platform,
-    });
-
-    return Response.json({ creativeWork, created: true }, { status: 201 });
+    return Response.json(
+      result,
+      result.created ? { status: 201 } : undefined,
+    );
   } catch (error) {
     if (error instanceof InvalidCreativeWorkRequestError) {
       return Response.json({ error: error.message }, { status: 400 });
+    }
+    if (error instanceof CreativeWorkOriginNotFoundError) {
+      return Response.json({ error: "Thought not found." }, { status: 404 });
     }
     return handleCreativeWorksError("POST /api/creative-works", error);
   }

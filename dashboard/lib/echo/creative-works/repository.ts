@@ -1,11 +1,12 @@
-import { getSupabaseServerClient } from "@/lib/echo/supabase/server-client";
+import { getSupabaseServerClient } from "../supabase/server-client.ts";
+import type { ServiceRoleRpcCaller } from "../supabase/service-role-client.ts";
 import type {
   CreativeWork,
   CreativeWorkOriginType,
   CreativeWorkPackage,
   CreativeWorkStatus,
   Platform,
-} from "@/lib/echo/types";
+} from "../types/index.ts";
 
 const USER_ID = "sebastian";
 
@@ -18,7 +19,7 @@ export class MissingCreativeWorksTableError extends Error {
   }
 }
 
-interface CreativeWorkRow {
+export interface CreativeWorkRow {
   id: string;
   user_id: string;
   origin_type: string;
@@ -46,7 +47,7 @@ function isMissingTableError(error: PostgrestErrorLike): boolean {
   );
 }
 
-function toCreativeWork(row: CreativeWorkRow): CreativeWork {
+export function toCreativeWork(row: CreativeWorkRow): CreativeWork {
   return {
     id: row.id,
     userId: row.user_id,
@@ -80,6 +81,126 @@ export interface CreateCreativeWorkInput {
   originType: CreativeWorkOriginType;
   originId: string | null;
   platform: Platform;
+}
+
+export class CreativeWorkOriginNotFoundError extends Error {
+  constructor() {
+    super("The originating thought no longer exists.");
+    this.name = "CreativeWorkOriginNotFoundError";
+  }
+}
+
+export class MissingCreativeWorkOpportunityMigrationError extends Error {
+  constructor() {
+    super(
+      "The atomic creative-work opportunity migration has not been applied. Apply the version-controlled Supabase migrations, then try again.",
+    );
+    this.name = "MissingCreativeWorkOpportunityMigrationError";
+  }
+}
+
+export class CreativeWorkOpportunityPersistenceError extends Error {
+  readonly code: string | null;
+
+  constructor(code: string | null = null) {
+    super("Echo could not safely create this creative-work opportunity.");
+    this.name = "CreativeWorkOpportunityPersistenceError";
+    this.code = code;
+  }
+}
+
+export interface GetOrCreateThoughtCreativeWorkResult {
+  creativeWork: CreativeWork;
+  created: boolean;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isCreativeWorkRow(value: unknown): value is CreativeWorkRow {
+  if (!isRecord(value)) return false;
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.user_id === "string" &&
+    typeof value.origin_type === "string" &&
+    (typeof value.origin_id === "string" || value.origin_id === null) &&
+    typeof value.platform === "string" &&
+    typeof value.status === "string" &&
+    (isRecord(value.package) || value.package === null) &&
+    (typeof value.reflection === "string" || value.reflection === null) &&
+    typeof value.created_at === "string" &&
+    typeof value.updated_at === "string" &&
+    (typeof value.generated_at === "string" || value.generated_at === null) &&
+    (typeof value.posted_at === "string" || value.posted_at === null)
+  );
+}
+
+function safePersistenceCode(code: unknown): string | null {
+  return typeof code === "string" && /^[A-Z0-9]{2,10}$/.test(code)
+    ? code
+    : null;
+}
+
+export async function getOrCreateThoughtCreativeWork(
+  thoughtId: string,
+  platform: Platform,
+): Promise<GetOrCreateThoughtCreativeWorkResult> {
+  const { callSupabaseServiceRoleRpc } = await import(
+    "../supabase/service-role-client.ts"
+  );
+  return getOrCreateThoughtCreativeWorkWithRpc(
+    thoughtId,
+    platform,
+    callSupabaseServiceRoleRpc,
+  );
+}
+
+export async function getOrCreateThoughtCreativeWorkWithRpc(
+  thoughtId: string,
+  platform: Platform,
+  callRpc: ServiceRoleRpcCaller,
+): Promise<GetOrCreateThoughtCreativeWorkResult> {
+  const { data, error } = await callRpc(
+    "get_or_create_thought_creative_work",
+    {
+      p_thought_id: thoughtId,
+      p_platform: platform,
+    },
+  );
+
+  if (error) {
+    const message = error.message ?? "";
+    if (
+      error.code === "P0001" &&
+      message.includes("ECHO_THOUGHT_NOT_FOUND")
+    ) {
+      throw new CreativeWorkOriginNotFoundError();
+    }
+    if (
+      (error.code === "PGRST202" || error.code === "42883") &&
+      message.toLowerCase().includes("get_or_create_thought_creative_work")
+    ) {
+      throw new MissingCreativeWorkOpportunityMigrationError();
+    }
+    throw new CreativeWorkOpportunityPersistenceError(
+      safePersistenceCode(error.code),
+    );
+  }
+
+  if (
+    !isRecord(data) ||
+    typeof data.created !== "boolean" ||
+    !isCreativeWorkRow(data.creative_work)
+  ) {
+    throw new CreativeWorkOpportunityPersistenceError();
+  }
+
+  return {
+    creativeWork: toCreativeWork(data.creative_work),
+    created: data.created,
+  };
 }
 
 export async function createCreativeWork(
