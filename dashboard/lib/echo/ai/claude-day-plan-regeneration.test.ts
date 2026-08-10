@@ -58,7 +58,7 @@ function fakeInput(): DayPlanRecommendationInput {
         id: "task-2",
         title: "Optional cleanup",
         description: null,
-        responsibilityArea: "content",
+        responsibilityArea: "tiktok",
         dueAt: null,
         estimatedMinutes: 30,
         energyRequired: "low",
@@ -255,22 +255,24 @@ test("structured-output schema exposes only explanation and task dispositions", 
 
 test("provider makes one structured-output request and returns Phase 1 validated output", async () => {
   let calls = 0;
-  let captured: Parameters<ClaudeDayPlanMessageCaller>[0] | null = null;
+  const captured: Parameters<ClaudeDayPlanMessageCaller>[0][] = [];
   const provider = createClaudeDayPlanRecommendationProvider(async (params) => {
     calls += 1;
-    captured = params;
+    captured.push(params);
     return { content: [{ type: "text", text: validResponseText() }] };
   });
 
   const result = await provider.recommend(fakeInput());
 
   assert.equal(calls, 1);
-  assert.equal(captured?.model, DAY_PLAN_REGENERATION_MODEL);
-  assert.equal(captured?.system, DAY_PLAN_REGENERATION_SYSTEM_PROMPT);
-  assert.equal(captured?.messages.length, 1);
-  assert.equal(captured?.messages[0].role, "user");
-  assert.equal(captured?.output_config?.format?.type, "json_schema");
-  const sentSchema = captured?.output_config?.format?.schema as
+  const request = captured[0];
+  assert.ok(request);
+  assert.equal(request.model, DAY_PLAN_REGENERATION_MODEL);
+  assert.equal(request.system, DAY_PLAN_REGENERATION_SYSTEM_PROMPT);
+  assert.equal(request.messages.length, 1);
+  assert.equal(request.messages[0].role, "user");
+  assert.equal(request.output_config?.format?.type, "json_schema");
+  const sentSchema = request.output_config?.format?.schema as
     | {
         properties: {
           explanation: Record<string, unknown>;

@@ -18,7 +18,7 @@ export interface SupabaseServerConfiguration {
 }
 
 export function resolveSupabaseServerConfiguration(
-  environment: NodeJS.ProcessEnv = process.env,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
 ): SupabaseServerConfiguration {
   const url = environment.SUPABASE_URL;
   const serviceRoleKey = environment.SUPABASE_SERVICE_ROLE_KEY;

@@ -20,7 +20,10 @@ import {
   StaleDayPlanRegenerationProposalError,
   type ProposeDayPlanRegenerationResult,
 } from "./regeneration-service.ts";
-import { InvalidDayPlanRegenerationProposalError } from "./regeneration-proposal.ts";
+import {
+  InvalidDayPlanRegenerationProposalError,
+  validateDayPlanRegenerationProposal,
+} from "./regeneration-proposal.ts";
 import { MissingDailyCheckInMigrationError } from "./migration-error.ts";
 import type { Commitment, DayPlan } from "../types/day-plan.ts";
 
@@ -49,10 +52,13 @@ function proposalResult(): ProposeDayPlanRegenerationResult {
   return {
     proposal: {
       schemaVersion: 1,
-      recommendation: {
-        explanation: "A focused plan.",
-        recommendations: [],
-      } as ProposeDayPlanRegenerationResult["proposal"]["recommendation"],
+      recommendation: validateDayPlanRegenerationProposal(
+        {
+          explanation: "A focused plan.",
+          recommendations: [],
+        },
+        { openTaskIds: [] },
+      ),
       inputFingerprint: "a".repeat(64),
       expectedCheckInCompletedAt: EXPECTED_CHECK_IN,
       generatedAt: "2026-07-23T13:00:00Z",

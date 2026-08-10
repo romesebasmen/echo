@@ -8,15 +8,19 @@ import {
   saveThenGenerate,
   saveThenRequestRegeneration,
 } from "./client-flow.ts";
+import { validateDayPlanRegenerationProposal } from "./regeneration-proposal.ts";
 import type { DayPlanRegenerationProposalEnvelope } from "../types/day-plan-regeneration.ts";
 
 function proposalEnvelope(): DayPlanRegenerationProposalEnvelope {
   return {
     schemaVersion: 1,
-    recommendation: {
-      explanation: "Protect the highest-value work.",
-      recommendations: [{ taskId: "task-1", disposition: "prioritize" }],
-    },
+    recommendation: validateDayPlanRegenerationProposal(
+      {
+        explanation: "Protect the highest-value work.",
+        recommendations: [{ taskId: "task-1", disposition: "prioritize" }],
+      },
+      { openTaskIds: ["task-1"] },
+    ),
     inputFingerprint: "a".repeat(64),
     expectedCheckInCompletedAt: "2026-08-08T14:00:00.000Z",
     generatedAt: "2026-08-08T14:01:00.000Z",
@@ -28,7 +32,7 @@ function proposalEnvelope(): DayPlanRegenerationProposalEnvelope {
         estimatedMinutes: 45,
       },
     ],
-  } as DayPlanRegenerationProposalEnvelope;
+  };
 }
 
 function deferred() {

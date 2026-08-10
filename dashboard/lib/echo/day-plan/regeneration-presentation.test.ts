@@ -4,6 +4,7 @@ import {
   dayPlanRegenerationErrorMessage,
   groupDayPlanRegenerationProposal,
 } from "./regeneration-presentation.ts";
+import { validateDayPlanRegenerationProposal } from "./regeneration-proposal.ts";
 import type {
   DayPlanRegenerationProposalEnvelope,
   DayPlanRegenerationTaskSummary,
@@ -24,14 +25,19 @@ function summary(
 function proposal(): DayPlanRegenerationProposalEnvelope {
   return {
     schemaVersion: 1,
-    recommendation: {
-      explanation: "Protect the most important work and leave room to recover.",
-      recommendations: [
-        { taskId: "task-defer", disposition: "defer" },
-        { taskId: "task-prioritize", disposition: "prioritize" },
-        { taskId: "task-keep", disposition: "keep" },
-      ],
-    },
+    recommendation: validateDayPlanRegenerationProposal(
+      {
+        explanation: "Protect the most important work and leave room to recover.",
+        recommendations: [
+          { taskId: "task-defer", disposition: "defer" },
+          { taskId: "task-prioritize", disposition: "prioritize" },
+          { taskId: "task-keep", disposition: "keep" },
+        ],
+      },
+      {
+        openTaskIds: ["task-defer", "task-prioritize", "task-keep"],
+      },
+    ),
     inputFingerprint: "a".repeat(64),
     expectedCheckInCompletedAt: "2026-08-08T14:00:00.000Z",
     generatedAt: "2026-08-08T14:01:00.000Z",
@@ -40,7 +46,7 @@ function proposal(): DayPlanRegenerationProposalEnvelope {
       summary("task-keep", "Reply to messages"),
       summary("task-defer", "Reorganize notes"),
     ],
-  } as DayPlanRegenerationProposalEnvelope;
+  };
 }
 
 test("groups server task summaries in the fixed recommendation category order", () => {

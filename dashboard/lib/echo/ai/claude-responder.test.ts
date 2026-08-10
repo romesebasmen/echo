@@ -33,10 +33,10 @@ test("production chat client disables Anthropic SDK retries", () => {
 
 test("chat responder makes exactly one model request and returns text", async () => {
   let calls = 0;
-  let captured: Parameters<ClaudeChatMessageCaller>[0] | null = null;
+  const captured: Parameters<ClaudeChatMessageCaller>[0][] = [];
   const respond = createClaudeResponder(async (params) => {
     calls += 1;
-    captured = params;
+    captured.push(params);
     return { content: [{ type: "text", text: "Start with the smallest version." }] };
   });
 
@@ -44,9 +44,11 @@ test("chat responder makes exactly one model request and returns text", async ()
 
   assert.equal(result, "Start with the smallest version.");
   assert.equal(calls, 1);
-  assert.equal(captured?.model, CHAT_MODEL);
-  assert.equal(captured?.messages.length, 2);
-  assert.deepEqual(captured?.messages.map((message) => message.role), [
+  const request = captured[0];
+  assert.ok(request);
+  assert.equal(request.model, CHAT_MODEL);
+  assert.equal(request.messages.length, 2);
+  assert.deepEqual(request.messages.map((message) => message.role), [
     "assistant",
     "user",
   ]);
