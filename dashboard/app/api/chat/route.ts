@@ -226,23 +226,56 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
+  let lockedConversationId: string | null = null;
+
   try {
     const supabase = getSupabaseServerClient();
     const conversationId = await getOrCreateConversationId();
+    if (!tryAcquireChatRequestLock(conversationId)) {
+      return Response.json(
+        { error: "Wait for Echo to finish responding before clearing the chat." },
+        { status: 409 },
+      );
+    }
+    lockedConversationId = conversationId;
 
-    const { error } = await supabase
-      .from("messages")
-      .delete()
-      .eq("conversation_id", conversationId);
+    await runWithAiOperationLease(
+      createAiOperationKey("chat", conversationId),
+      async () => {
+        const { error } = await supabase
+          .from("messages")
+          .delete()
+          .eq("conversation_id", conversationId);
 
-    if (error) throw error;
+        if (error) throw error;
+      },
+    );
 
     return Response.json({ ok: true });
   } catch (error) {
+    if (error instanceof AiOperationInProgressError) {
+      return Response.json(
+        { error: "Wait for Echo to finish responding before clearing the chat." },
+        { status: 409 },
+      );
+    }
+
+    if (error instanceof AiOperationLeaseUnavailableError) {
+      console.error("DELETE /api/chat failed:", formatError(error));
+      return Response.json(
+        { error: "Echo couldn't safely coordinate clearing this conversation." },
+        { status: 503 },
+      );
+    }
+
     console.error("DELETE /api/chat failed:", formatError(error));
     return Response.json(
       { error: "Could not clear conversation." },
       { status: 500 },
     );
+  } finally {
+    if (lockedConversationId) {
+      releaseChatRequestLock(lockedConversationId);
+    }
   }
 }
