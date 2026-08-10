@@ -34,6 +34,8 @@ export interface SaveDayPlanInput {
 interface DayPlanResponse {
   dayPlan: DayPlan | null;
   planningContext: PlanningContext | null;
+  scheduleBlocks: ScheduleBlock[];
+  unscheduled: Task[];
 }
 
 interface GenerateDayPlanResponse {
@@ -110,6 +112,8 @@ export function useDayPlan() {
       const body = await responseBody<DayPlanResponse>(response);
       setDayPlan(body.dayPlan);
       setPlanningContext(body.planningContext);
+      setScheduleBlocks(body.scheduleBlocks);
+      setUnscheduled(body.unscheduled);
     } catch (loadError) {
       setClientError({ kind: "load", message: errorMessage(loadError) });
     } finally {
@@ -153,10 +157,8 @@ export function useDayPlan() {
   function applySavedCheckIn(body: DayPlanResponse) {
     setDayPlan(body.dayPlan);
     setPlanningContext(body.planningContext);
-    if (body.dayPlan?.status !== "generated") {
-      setScheduleBlocks([]);
-      setUnscheduled([]);
-    }
+    setScheduleBlocks(body.scheduleBlocks);
+    setUnscheduled(body.unscheduled);
   }
 
   async function saveAndGeneratePlan(input: SaveDayPlanInput): Promise<boolean> {

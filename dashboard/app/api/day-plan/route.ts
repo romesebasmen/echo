@@ -3,44 +3,36 @@ import {
   MissingDayPlansTableError,
   saveDayPlanCheckIn,
 } from "@/lib/echo/day-plan/repository";
-import { isCheckInComplete } from "@/lib/echo/day-plan/check-in";
+import { loadCurrentDayPlanState } from "@/lib/echo/day-plan/current-state";
 import { MissingDailyCheckInMigrationError } from "@/lib/echo/day-plan/migration-error";
 import {
-  createPlanningContext,
   InvalidPlanningContextError,
   MAX_CHECK_IN_NOTES_LENGTH,
 } from "@/lib/echo/day-plan/planning-context";
+import {
+  listScheduleBlocks,
+  MissingScheduleBlocksTableError,
+} from "@/lib/echo/day-plan/schedule-blocks-repository";
+import { listTasks, MissingTasksTableError } from "@/lib/echo/tasks/repository";
 import { formatError } from "@/lib/echo/errors";
 import { parseTimestampWithExplicitOffset, toUserDateString } from "@/lib/echo/timezone";
-import type { DayPlan, PlanningContext, SleepQuality } from "@/lib/echo/types";
+import type { SleepQuality } from "@/lib/echo/types";
 
 const SLEEP_QUALITIES: SleepQuality[] = ["poor", "okay", "good"];
-
-function contextForCompletePlan(dayPlan: DayPlan): PlanningContext | null {
-  if (!isCheckInComplete(dayPlan)) return null;
-
-  return createPlanningContext({
-    planDate: dayPlan.planDate,
-    availableFrom: dayPlan.availableFrom,
-    endOfWorkTime: dayPlan.endOfWorkTime,
-    energy: dayPlan.energy,
-    stress: dayPlan.stress!,
-    sleepQuality: dayPlan.sleepQuality!,
-    hasEaten: dayPlan.hasEaten!,
-    checkInNotes: dayPlan.checkInNotes,
-    checkInCompletedAt: dayPlan.checkInCompletedAt!,
-  });
-}
 
 function handleDayPlanError(routeLabel: string, error: unknown) {
   if (error instanceof MissingDailyCheckInMigrationError) {
     console.error(`${routeLabel} failed: daily-checkin migration is missing.`);
     return Response.json({ error: error.message }, { status: 500 });
   }
-  if (error instanceof MissingDayPlansTableError) {
-    console.error(`${routeLabel} failed: day_plans table is missing.`);
+  if (
+    error instanceof MissingDayPlansTableError ||
+    error instanceof MissingScheduleBlocksTableError ||
+    error instanceof MissingTasksTableError
+  ) {
+    console.error(`${routeLabel} failed: a required planning table is missing.`);
     return Response.json(
-      { error: "The day_plans table doesn't exist yet. Run the setup SQL, then try again." },
+      { error: "A required planning table is missing. Run the setup SQL, then try again." },
       { status: 500 },
     );
   }
@@ -56,11 +48,12 @@ function handleDayPlanError(routeLabel: string, error: unknown) {
 export async function GET() {
   try {
     const planDate = toUserDateString(new Date());
-    const dayPlan = await getDayPlanForDate(planDate);
-    return Response.json({
-      dayPlan,
-      planningContext: dayPlan ? contextForCompletePlan(dayPlan) : null,
+    const state = await loadCurrentDayPlanState(planDate, {
+      getDayPlanForDate,
+      listScheduleBlocks,
+      listTasks,
     });
+    return Response.json(state);
   } catch (error) {
     return handleDayPlanError("GET /api/day-plan", error);
   }
@@ -158,7 +151,12 @@ export async function PUT(request: Request) {
       checkInCompletedAt: now.toISOString(),
     });
 
-    return Response.json({ dayPlan, planningContext: contextForCompletePlan(dayPlan) });
+    const state = await loadCurrentDayPlanState(planDate, {
+      getDayPlanForDate: async () => dayPlan,
+      listScheduleBlocks,
+      listTasks,
+    });
+    return Response.json(state);
   } catch (error) {
     return handleDayPlanError("PUT /api/day-plan", error);
   }

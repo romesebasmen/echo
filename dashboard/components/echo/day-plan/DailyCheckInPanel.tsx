@@ -7,6 +7,7 @@ import {
   dayPlanRegenerationErrorMessage,
   groupDayPlanRegenerationProposal,
 } from "@/lib/echo/day-plan/regeneration-presentation";
+import { presentScheduleBlock } from "@/lib/echo/day-plan/schedule-presentation";
 import {
   fromUserDateTimeLocalString,
   toUserDateString,
@@ -16,8 +17,11 @@ import type {
   DayPlan,
   DayPlanRegenerationProposalEnvelope,
   PlanningContext,
+  ScheduleBlock,
   SleepQuality,
+  Task,
 } from "@/lib/echo/types";
+import { RESPONSIBILITY_AREA_LABELS } from "@/lib/echo/types";
 
 function defaultAvailability() {
   const now = new Date();
@@ -46,8 +50,6 @@ interface CheckInFormProps {
   isSaving: boolean;
   isGenerating: boolean;
   isRegenerating: boolean;
-  scheduleBlockCount: number;
-  unscheduledCount: number;
   onSave: ReturnType<typeof useDayPlan>["saveCheckIn"];
   onGenerate: ReturnType<typeof useDayPlan>["saveAndGeneratePlan"];
   onRegenerate: ReturnType<typeof useDayPlan>["regenerateWithEcho"];
@@ -61,8 +63,6 @@ function CheckInForm({
   isSaving,
   isGenerating,
   isRegenerating,
-  scheduleBlockCount,
-  unscheduledCount,
   onSave,
   onGenerate,
   onRegenerate,
@@ -307,16 +307,93 @@ function CheckInForm({
         </p>
       )}
 
-      {scheduleBlockCount > 0 && (
-        <p className="text-sm text-muted">
-          Today’s plan has {scheduleBlockCount} scheduled block
-          {scheduleBlockCount === 1 ? "" : "s"}.
-          {unscheduledCount > 0
-            ? ` ${unscheduledCount} task${unscheduledCount === 1 ? " is" : "s are"} still visible for later.`
-            : " Everything selected fits within today’s capacity."}
-        </p>
-      )}
     </form>
+  );
+}
+
+interface TodayPlanProps {
+  dayPlan: DayPlan | null;
+  scheduleBlocks: ScheduleBlock[];
+  unscheduled: Task[];
+}
+
+function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
+  if (dayPlan?.status !== "generated") return null;
+
+  return (
+    <section aria-labelledby="today-plan-heading" className="mt-9 border-t border-border pt-8">
+      <div className="flex flex-col gap-2">
+        <p className="text-xs uppercase tracking-[0.18em] text-muted">The plan</p>
+        <h3 id="today-plan-heading" className="text-xl font-semibold text-foreground">
+          Today’s plan
+        </h3>
+        <p className="max-w-2xl text-sm leading-6 text-muted">
+          Commitments stay fixed. Task work and breaks reflect the capacity you shared today.
+        </p>
+      </div>
+
+      {scheduleBlocks.length === 0 ? (
+        <p className="mt-6 text-sm text-muted">
+          {unscheduled.length > 0
+            ? "Nothing fits inside the available window yet. Your open tasks remain visible below."
+            : "There was nothing to schedule inside today’s available window."}
+        </p>
+      ) : (
+        <ol className="mt-6 border-b border-border">
+          {scheduleBlocks.map((block) => {
+            const presentation = presentScheduleBlock(block);
+            const isBreak = block.sourceType === "break";
+            return (
+              <li
+                key={block.id}
+                className="grid gap-2 border-t border-border py-4 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-6"
+              >
+                <time
+                  dateTime={block.startTime}
+                  className="text-sm font-medium tabular-nums text-foreground"
+                >
+                  {presentation.timeRange}
+                </time>
+                <div className="min-w-0">
+                  <p className="text-xs uppercase tracking-[0.14em] text-muted">
+                    {presentation.kindLabel}
+                  </p>
+                  <p className={`mt-1 text-sm ${isBreak ? "text-muted" : "text-foreground"}`}>
+                    {block.title}
+                  </p>
+                  {block.responsibilityArea && (
+                    <p className="mt-1 text-xs text-muted">
+                      {RESPONSIBILITY_AREA_LABELS[block.responsibilityArea]}
+                    </p>
+                  )}
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+
+      {unscheduled.length > 0 && (
+        <div className="mt-7">
+          <h4 className="text-sm font-medium text-foreground">Still unscheduled</h4>
+          <p className="mt-1 max-w-2xl text-sm leading-6 text-muted">
+            These stay visible because they were deferred or did not fit today’s time and capacity.
+          </p>
+          <ul className="mt-4 flex flex-col gap-2.5">
+            {unscheduled.map((task) => (
+              <li key={task.id} className="flex items-baseline justify-between gap-4 text-sm">
+                <span className="text-foreground">{task.title}</span>
+                {task.estimatedMinutes !== null && (
+                  <span className="shrink-0 text-xs text-muted">
+                    {minutesLabel(task.estimatedMinutes)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -443,14 +520,18 @@ export function DailyCheckInPanel() {
           isSaving={dayPlan.isSaving}
           isGenerating={dayPlan.isGenerating}
           isRegenerating={dayPlan.isRegenerating}
-          scheduleBlockCount={dayPlan.scheduleBlocks.length}
-          unscheduledCount={dayPlan.unscheduled.length}
           onSave={dayPlan.saveCheckIn}
           onGenerate={dayPlan.saveAndGeneratePlan}
           onRegenerate={dayPlan.regenerateWithEcho}
           onCheckInChange={dayPlan.checkInInputChanged}
         />
       )}
+
+      <TodayPlan
+        dayPlan={dayPlan.dayPlan}
+        scheduleBlocks={dayPlan.scheduleBlocks}
+        unscheduled={dayPlan.unscheduled}
+      />
 
       {dayPlan.regenerationProposal && (
         <RegenerationReview
