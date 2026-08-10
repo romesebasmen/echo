@@ -6,18 +6,13 @@ import {
 import { isValidStatusTransition } from "@/lib/echo/creative-works/transitions";
 import { formatError } from "@/lib/echo/errors";
 import type { CreativeWorkStatus } from "@/lib/echo/types";
+import {
+  InvalidCreativeWorkRequestError,
+  parseCreativeWorkUpdateRequest,
+} from "@/lib/echo/creative-works/request";
 
 // No Anthropic import anywhere in this file — fetching and patching status
 // or reflection are pure Supabase reads/writes.
-
-const STATUSES: CreativeWorkStatus[] = [
-  "opportunity",
-  "ready",
-  "filming",
-  "editing",
-  "posted",
-  "abandoned",
-];
 
 function handleCreativeWorksError(routeLabel: string, error: unknown) {
   if (error instanceof MissingCreativeWorksTableError) {
@@ -59,17 +54,13 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
-
-    const statusInput = typeof body.status === "string" ? body.status : undefined;
-    const reflectionInput =
-      typeof body.reflection === "string" && body.reflection.trim()
-        ? body.reflection.trim()
-        : undefined;
-
-    if (statusInput === undefined && reflectionInput === undefined) {
-      return Response.json({ error: "No valid fields to update." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const input = parseCreativeWorkUpdateRequest(body);
 
     // Ownership: getCreativeWorkById is scoped to the current user
     // internally — a work belonging to someone else (hypothetically) or
@@ -82,11 +73,8 @@ export async function PATCH(
     let status: CreativeWorkStatus | undefined;
     let postedAt: string | undefined;
 
-    if (statusInput !== undefined) {
-      if (!STATUSES.includes(statusInput as CreativeWorkStatus)) {
-        return Response.json({ error: "Invalid status value." }, { status: 400 });
-      }
-      status = statusInput as CreativeWorkStatus;
+    if (input.status !== undefined) {
+      status = input.status;
 
       // Forward-only workflow, enforced here (not in the repository, which
       // stays a generic data layer). No arbitrary jumps: only the specific
@@ -105,12 +93,15 @@ export async function PATCH(
 
     const creativeWork = await updateCreativeWork(id, {
       status,
-      reflection: reflectionInput,
+      reflection: input.reflection,
       postedAt,
     });
 
     return Response.json({ creativeWork });
   } catch (error) {
+    if (error instanceof InvalidCreativeWorkRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     return handleCreativeWorksError("PATCH /api/creative-works/[id]", error);
   }
 }

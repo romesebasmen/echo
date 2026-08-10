@@ -6,6 +6,10 @@ import {
 } from "@/lib/echo/creative-works/repository";
 import { getThoughtById } from "@/lib/echo/thoughts/repository";
 import { formatError } from "@/lib/echo/errors";
+import {
+  InvalidCreativeWorkRequestError,
+  parseCreativeWorkCreateRequest,
+} from "@/lib/echo/creative-works/request";
 import type { CreativeWorkStatus, Platform } from "@/lib/echo/types";
 
 // No Anthropic import anywhere in this file — listing and creating an
@@ -58,12 +62,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const body = (await request.json()) as Record<string, unknown>;
-    const thoughtId = typeof body.thoughtId === "string" ? body.thoughtId.trim() : "";
-
-    if (!thoughtId) {
-      return Response.json({ error: "thoughtId is required." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const { thoughtId } = parseCreativeWorkCreateRequest(body);
 
     // Ownership check: getThoughtById is scoped to the current user
     // internally (the app's single hardcoded user) — a thought that doesn't
@@ -91,6 +96,9 @@ export async function POST(request: Request) {
 
     return Response.json({ creativeWork, created: true }, { status: 201 });
   } catch (error) {
+    if (error instanceof InvalidCreativeWorkRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     return handleCreativeWorksError("POST /api/creative-works", error);
   }
 }

@@ -15,6 +15,8 @@ export type CreativeWorkStatus =
   | "posted"
   | "abandoned";
 
+export const MAX_CREATIVE_WORK_REFLECTION_LENGTH = 2_000;
+
 // Shape of the AI-generated production package once a work reaches "ready".
 // The generator that produces this isn't built yet — this type only
 // describes what will eventually populate the `package` column.

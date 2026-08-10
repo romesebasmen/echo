@@ -15,6 +15,10 @@ import {
 } from "@/lib/echo/creative-works/generation-lock";
 import { creatorProfile } from "@/lib/echo/profile";
 import { formatError } from "@/lib/echo/errors";
+import {
+  InvalidCreativeWorkRequestError,
+  parseCreativeWorkGenerationRequest,
+} from "@/lib/echo/creative-works/request";
 
 // SERVER-ONLY. This is the only route in the app that calls Anthropic to
 // produce a TikTok package, and it must make at most one call per request —
@@ -32,13 +36,14 @@ export async function POST(
   let lockAcquired = false;
 
   try {
-    let body: Record<string, unknown> = {};
+    let body: unknown = {};
     try {
-      body = (await request.json()) as Record<string, unknown>;
+      const rawBody = await request.text();
+      body = rawBody ? JSON.parse(rawBody) : {};
     } catch {
-      // No/empty body is fine — treated as force: false.
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
-    const force = body.force === true;
+    const { force } = parseCreativeWorkGenerationRequest(body);
 
     // Ownership: getCreativeWorkById is scoped to the current user
     // internally.
@@ -134,6 +139,9 @@ export async function POST(
 
     return Response.json({ creativeWork: updated, generated: true });
   } catch (error) {
+    if (error instanceof InvalidCreativeWorkRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     if (error instanceof MissingCreativeWorksTableError) {
       console.error(
         `POST /api/creative-works/${id}/generate failed: creative_works table is missing.`,

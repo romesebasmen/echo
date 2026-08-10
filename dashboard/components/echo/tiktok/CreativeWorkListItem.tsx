@@ -1,7 +1,11 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import type { CreativeWork, CreativeWorkStatus } from "@/lib/echo/types";
+import {
+  MAX_CREATIVE_WORK_REFLECTION_LENGTH,
+  type CreativeWork,
+  type CreativeWorkStatus,
+} from "@/lib/echo/types";
 
 const NEXT_STATUS: Partial<
   Record<CreativeWorkStatus, { status: CreativeWorkStatus; label: string }>
@@ -94,6 +98,7 @@ export function CreativeWorkListItem({
             id={`reflection-${work.id}`}
             value={reflectionDraft}
             onChange={(event) => setReflectionDraft(event.target.value)}
+            maxLength={MAX_CREATIVE_WORK_REFLECTION_LENGTH}
             rows={2}
             placeholder="How did it go?"
             className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent"
