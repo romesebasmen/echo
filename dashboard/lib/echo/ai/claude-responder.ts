@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAnthropicWithDiagnostics } from "./anthropic-diagnostics.ts";
 import { ECHO_SYSTEM_PROMPT } from "./system-prompt.ts";
 import type { ChatMessage, Memory } from "../types/index.ts";
 
@@ -105,5 +106,7 @@ Treat this as background, not a script — only bring it up if it's actually rel
 
 export const getClaudeReply = createClaudeResponder(async (params) => {
   const client = getClient();
-  return client.messages.create(params);
+  return callAnthropicWithDiagnostics("Chat", () =>
+    client.messages.create(params),
+  );
 });

@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAnthropicWithDiagnostics } from "./anthropic-diagnostics.ts";
 import { BRIEFING_SYSTEM_PROMPT } from "./briefing-system-prompt.ts";
 import type { BriefingPatternKind } from "../types/index.ts";
 
@@ -33,6 +34,16 @@ export class InvalidGeneratedBriefingError extends Error {
   constructor(reason: string) {
     super(`Generated briefing failed validation: ${reason}`);
     this.name = "InvalidGeneratedBriefingError";
+  }
+}
+
+export class BriefingProviderUnavailableError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("The Echo briefing provider is unavailable.");
+    this.name = "BriefingProviderUnavailableError";
+    this.cause = cause;
   }
 }
 
@@ -199,21 +210,27 @@ export function parseGeneratedBriefingContent(value: unknown): GeneratedBriefing
 export async function generateBriefingContent(
   input: BriefingGenerationInput,
 ): Promise<GeneratedBriefingContent> {
-  const client = getClient();
-
-  const response = await client.messages.create({
-    model: BRIEFING_MODEL,
-    max_tokens: 1024,
-    system: BRIEFING_SYSTEM_PROMPT,
-    output_config: {
-      format: { type: "json_schema", schema: BRIEFING_JSON_SCHEMA },
-    },
-    messages: [{ role: "user", content: buildUserPrompt(input) }],
-  });
+  let response;
+  try {
+    const client = getClient();
+    response = await callAnthropicWithDiagnostics("Briefing", () =>
+      client.messages.create({
+        model: BRIEFING_MODEL,
+        max_tokens: 1024,
+        system: BRIEFING_SYSTEM_PROMPT,
+        output_config: {
+          format: { type: "json_schema", schema: BRIEFING_JSON_SCHEMA },
+        },
+        messages: [{ role: "user", content: buildUserPrompt(input) }],
+      }),
+    );
+  } catch (error) {
+    throw new BriefingProviderUnavailableError(error);
+  }
 
   const textBlock = response.content.find((block) => block.type === "text");
   if (!textBlock || textBlock.type !== "text") {
-    throw new Error("Briefing response contained no text content.");
+    throw new InvalidGeneratedBriefingError("response contained no text content");
   }
 
   let parsed: unknown;

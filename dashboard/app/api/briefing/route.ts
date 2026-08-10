@@ -3,6 +3,11 @@ import {
   regenerateTodaysBriefing,
 } from "@/lib/echo/daily-briefing/generator";
 import { MissingBriefingsTableError } from "@/lib/echo/daily-briefing/repository";
+import {
+  BriefingProviderUnavailableError,
+  InvalidGeneratedBriefingError,
+} from "@/lib/echo/ai/claude-briefing";
+import { formatError } from "@/lib/echo/errors";
 
 function handleBriefingError(routeLabel: string, error: unknown) {
   if (error instanceof MissingBriefingsTableError) {
@@ -16,7 +21,18 @@ function handleBriefingError(routeLabel: string, error: unknown) {
     );
   }
 
-  console.error(`${routeLabel} failed:`, error);
+  if (
+    error instanceof BriefingProviderUnavailableError ||
+    error instanceof InvalidGeneratedBriefingError
+  ) {
+    console.error(`${routeLabel} failed:`, formatError(error));
+    return Response.json(
+      { error: "Echo couldn't prepare the briefing because its AI provider is unavailable." },
+      { status: 502 },
+    );
+  }
+
+  console.error(`${routeLabel} failed:`, formatError(error));
   return Response.json({ error: "Could not load today's briefing." }, { status: 500 });
 }
 

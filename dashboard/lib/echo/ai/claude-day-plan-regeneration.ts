@@ -1,5 +1,12 @@
-import Anthropic, { APIConnectionError, APIError } from "@anthropic-ai/sdk";
+import Anthropic from "@anthropic-ai/sdk";
 import { jsonSchemaOutputFormat } from "@anthropic-ai/sdk/helpers/json-schema";
+import {
+  callAnthropicWithDiagnostics,
+  MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH,
+  summarizeAnthropicError,
+  type AnthropicDiagnosticLogger,
+  type SafeAnthropicErrorSummary,
+} from "./anthropic-diagnostics.ts";
 import {
   buildDayPlanRegenerationUserPrompt,
   DAY_PLAN_REGENERATION_SYSTEM_PROMPT,
@@ -25,9 +32,7 @@ import {
 
 export const DAY_PLAN_REGENERATION_MODEL = "claude-opus-4-8";
 export const DAY_PLAN_REGENERATION_MAX_RETRIES = 0;
-export const MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH = 240;
 const MAX_OUTPUT_TOKENS = 2_048;
-const ANTHROPIC_API_KEY_PATTERN = /sk-ant-[a-z0-9_-]+/gi;
 
 interface ClaudeResponseBlock {
   type: string;
@@ -42,69 +47,12 @@ export type ClaudeDayPlanMessageCaller = (
   params: Anthropic.MessageCreateParamsNonStreaming,
 ) => Promise<ClaudeDayPlanRecommendationResponse>;
 
-export interface SafeAnthropicErrorSummary {
-  sdkErrorName: string;
-  status: number | null;
-  type: string | null;
-  requestId: string | null;
-  safeMessage: string;
-}
-
-export type AnthropicDiagnosticLogger = (message: string) => void;
-
-function redactAndTruncateConnectionMessage(message: string): string {
-  const redacted = message
-    .replace(ANTHROPIC_API_KEY_PATTERN, "[REDACTED]")
-    .replace(/\s+/g, " ")
-    .trim();
-  const fallback = redacted || "Anthropic connection failed.";
-
-  if (fallback.length <= MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH) {
-    return fallback;
-  }
-
-  return `${fallback.slice(0, MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH - 1)}…`;
-}
-
-export function summarizeAnthropicError(error: unknown): SafeAnthropicErrorSummary {
-  if (error instanceof APIConnectionError) {
-    return {
-      sdkErrorName: error.constructor.name,
-      status: null,
-      type: "connection_error",
-      requestId: null,
-      safeMessage: redactAndTruncateConnectionMessage(error.message),
-    };
-  }
-
-  if (error instanceof APIError) {
-    const status = error.status ?? null;
-    const type = error.type ?? null;
-    return {
-      sdkErrorName: error.constructor.name,
-      status,
-      type,
-      requestId: error.requestID ?? null,
-      // Do not use APIError.message here: the SDK may build it from the
-      // response body. Status and type are enough to diagnose safely.
-      safeMessage: type
-        ? `Anthropic API request failed (${type}).`
-        : status
-          ? `Anthropic API request failed with HTTP ${status}.`
-          : "Anthropic API request failed.",
-    };
-  }
-
-  return {
-    sdkErrorName: error instanceof Error ? error.constructor.name : "UnknownError",
-    status: null,
-    type: null,
-    requestId: null,
-    // Unknown errors are deliberately not echoed because their messages may
-    // contain arbitrary request context.
-    safeMessage: "Anthropic SDK request failed.",
-  };
-}
+export {
+  MAX_SAFE_ANTHROPIC_ERROR_MESSAGE_LENGTH,
+  summarizeAnthropicError,
+  type AnthropicDiagnosticLogger,
+  type SafeAnthropicErrorSummary,
+};
 
 export async function callAnthropicDayPlanModelWithDiagnostics<T>(
   callModel: () => Promise<T>,
@@ -112,13 +60,7 @@ export async function callAnthropicDayPlanModelWithDiagnostics<T>(
     console.error(message);
   },
 ): Promise<T> {
-  try {
-    return await callModel();
-  } catch (error) {
-    const summary = summarizeAnthropicError(error);
-    logError(`Day-plan Anthropic request failed: ${JSON.stringify(summary)}`);
-    throw error;
-  }
+  return callAnthropicWithDiagnostics("Day-plan", callModel, logError);
 }
 
 let cachedClient: Anthropic | null = null;

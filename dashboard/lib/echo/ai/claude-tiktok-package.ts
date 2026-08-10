@@ -1,18 +1,28 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAnthropicWithDiagnostics } from "./anthropic-diagnostics.ts";
 import { TIKTOK_PACKAGE_SYSTEM_PROMPT } from "./tiktok-package-prompt.ts";
 import type { CreativeWorkPackage } from "../types/index.ts";
 
 // SERVER-ONLY. Import this only from Route Handlers (app/api/**/route.ts).
 // ANTHROPIC_API_KEY is read here and must never reach the browser bundle.
 //
-// Deliberately no retry loop here (unlike claude-memory-extraction.ts) — a
-// generation call has a real cost and the caller (the generate route) is
-// responsible for deciding whether to try again, not this module.
+// Deliberately no retry loop: a generation call has a real cost and the caller
+// is responsible for deciding whether to try again, not this module.
 
 export class InvalidGeneratedPackageError extends Error {
   constructor(reason: string) {
     super(`Generated TikTok package failed validation: ${reason}`);
     this.name = "InvalidGeneratedPackageError";
+  }
+}
+
+export class TikTokPackageProviderUnavailableError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("The Echo TikTok package provider is unavailable.");
+    this.name = "TikTokPackageProviderUnavailableError";
+    this.cause = cause;
   }
 }
 
@@ -306,20 +316,26 @@ function logPromptSizeBreakdown(
 export async function generateTikTokPackage(
   input: TikTokPackageGenerationInput,
 ): Promise<CreativeWorkPackage> {
-  const client = getClient();
-
   const sections = buildPromptSections(input);
   logPromptSizeBreakdown(input, sections);
 
-  const response = await client.messages.create({
-    model: TIKTOK_PACKAGE_MODEL,
-    max_tokens: 1536,
-    system: TIKTOK_PACKAGE_SYSTEM_PROMPT,
-    output_config: {
-      format: { type: "json_schema", schema: TIKTOK_PACKAGE_JSON_SCHEMA },
-    },
-    messages: [{ role: "user", content: buildUserPrompt(input, sections) }],
-  });
+  let response;
+  try {
+    const client = getClient();
+    response = await callAnthropicWithDiagnostics("TikTok package", () =>
+      client.messages.create({
+        model: TIKTOK_PACKAGE_MODEL,
+        max_tokens: 1536,
+        system: TIKTOK_PACKAGE_SYSTEM_PROMPT,
+        output_config: {
+          format: { type: "json_schema", schema: TIKTOK_PACKAGE_JSON_SCHEMA },
+        },
+        messages: [{ role: "user", content: buildUserPrompt(input, sections) }],
+      }),
+    );
+  } catch (error) {
+    throw new TikTokPackageProviderUnavailableError(error);
+  }
 
   console.log(
     `TikTok package generation token usage — input: ${response.usage.input_tokens}, output: ${response.usage.output_tokens}`,

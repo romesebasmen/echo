@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
+import { callAnthropicWithDiagnostics } from "./anthropic-diagnostics.ts";
 import { MEMORY_EXTRACTION_SYSTEM_PROMPT } from "./memory-extraction-prompt.ts";
 import type {
   MemoryCategory,
@@ -37,6 +38,16 @@ export class InvalidMemoryExtractionResponseError extends Error {
   constructor(reason: string) {
     super(`Memory extraction response failed validation: ${reason}`);
     this.name = "InvalidMemoryExtractionResponseError";
+  }
+}
+
+export class MemoryExtractionProviderUnavailableError extends Error {
+  readonly cause: unknown;
+
+  constructor(cause: unknown) {
+    super("The Echo memory extraction provider is unavailable.");
+    this.name = "MemoryExtractionProviderUnavailableError";
+    this.cause = cause;
   }
 }
 
@@ -178,8 +189,14 @@ export function createMemoryOperationsExtractor(
 
 export const extractMemoryOperations = createMemoryOperationsExtractor(
   async (params) => {
-    const client = getClient();
-    return client.messages.create(params);
+    try {
+      const client = getClient();
+      return await callAnthropicWithDiagnostics("Memory extraction", () =>
+        client.messages.create(params),
+      );
+    } catch (error) {
+      throw new MemoryExtractionProviderUnavailableError(error);
+    }
   },
 );
 
