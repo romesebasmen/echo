@@ -23,6 +23,20 @@ const userWallClockFormatter = new Intl.DateTimeFormat("en-US", {
   hourCycle: "h23",
 });
 
+const userDateTimeDisplayFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: USER_TIME_ZONE,
+  month: "short",
+  day: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+});
+
+const userTimeDisplayFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: USER_TIME_ZONE,
+  hour: "numeric",
+  minute: "2-digit",
+});
+
 // "YYYY-MM-DD" as the date would read on a calendar in the user's timezone
 // for the given instant.
 export function toUserDateString(date: Date): string {
@@ -46,6 +60,14 @@ export function toUserDateTimeLocalString(date: Date): string {
   const parts = userWallClockParts(date);
   const pad = (value: number) => String(value).padStart(2, "0");
   return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+}
+
+export function formatUserDateTime(date: Date): string {
+  return userDateTimeDisplayFormatter.format(date);
+}
+
+export function formatUserTime(date: Date): string {
+  return userTimeDisplayFormatter.format(date);
 }
 
 // Converts an America/Chicago wall-clock value from a datetime-local input

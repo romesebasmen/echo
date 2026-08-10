@@ -3,6 +3,7 @@
 import { useId, useState, type FormEvent } from "react";
 import type { Thought } from "@/lib/echo/types";
 import { useThoughts } from "@/lib/echo/thoughts/useThoughts";
+import { formatUserTime } from "@/lib/echo/timezone";
 import { useCreativeWorks } from "@/lib/echo/creative-works/useCreativeWorks";
 import {
   MAX_THOUGHT_CONTENT_LENGTH,
@@ -234,10 +235,7 @@ export function ThoughtInbox() {
                     </p>
                   )}
                   <p className="text-xs text-muted">
-                    {new Date(thought.createdAt).toLocaleTimeString(undefined, {
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
+                    {formatUserTime(new Date(thought.createdAt))}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-3">

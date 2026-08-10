@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   calendarDayDifference,
+  formatUserDateTime,
+  formatUserTime,
   fromUserDateTimeLocalString,
   isSameUserDay,
   parseTimestampWithExplicitOffset,
@@ -9,6 +11,12 @@ import {
   toUserDateString,
   toUserDateTimeLocalString,
 } from "./timezone.ts";
+
+test("display formatting is stable in America/Chicago across browser timezones", () => {
+  const instant = new Date("2026-08-10T01:30:00Z");
+  assert.equal(formatUserDateTime(instant), "Aug 9, 8:30 PM");
+  assert.equal(formatUserTime(instant), "8:30 PM");
+});
 
 test("datetime-local formatting always uses America/Chicago", () => {
   assert.equal(

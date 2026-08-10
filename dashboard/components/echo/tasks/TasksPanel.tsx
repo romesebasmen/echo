@@ -16,6 +16,10 @@ import {
   MAX_TASK_TITLE_LENGTH,
   MIN_TASK_ESTIMATED_MINUTES,
 } from "@/lib/echo/tasks/request";
+import {
+  formatUserDateTime,
+  fromUserDateTimeLocalString,
+} from "@/lib/echo/timezone";
 
 const LEVELS: (TaskEnergyLevel | TaskPriority)[] = ["low", "medium", "high"];
 
@@ -34,6 +38,7 @@ export function TasksPanel() {
   const [energyRequired, setEnergyRequired] = useState<TaskEnergyLevel>("medium");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [deepWork, setDeepWork] = useState(false);
+  const [dueAtError, setDueAtError] = useState<string | null>(null);
 
   const titleId = useId();
   const areaId = useId();
@@ -45,11 +50,17 @@ export function TasksPanel() {
 
     const trimmedTitle = title.trim();
     if (!trimmedTitle) return;
+    const dueDate = dueAt ? fromUserDateTimeLocalString(dueAt) : null;
+    if (dueAt && !dueDate) {
+      setDueAtError("Choose a valid America/Chicago date and time.");
+      return;
+    }
+    setDueAtError(null);
 
     const success = await createTask({
       title: trimmedTitle,
       responsibilityArea,
-      dueAt: dueAt ? new Date(dueAt).toISOString() : undefined,
+      dueAt: dueDate?.toISOString(),
       estimatedMinutes: estimatedMinutes ? Number(estimatedMinutes) : undefined,
       energyRequired,
       priority,
@@ -115,9 +126,19 @@ export function TasksPanel() {
               id={dueId}
               type="datetime-local"
               value={dueAt}
-              onChange={(event) => setDueAt(event.target.value)}
+              onChange={(event) => {
+                setDueAt(event.target.value);
+                setDueAtError(null);
+              }}
+              aria-describedby={dueAtError ? `${dueId}-error` : undefined}
+              aria-invalid={Boolean(dueAtError)}
               className={inputClassName}
             />
+            {dueAtError && (
+              <p id={`${dueId}-error`} className="text-xs text-accent">
+                {dueAtError}
+              </p>
+            )}
           </div>
         </div>
 
@@ -206,12 +227,7 @@ export function TasksPanel() {
                 </h3>
                 {task.dueAt && (
                   <p className="text-sm text-muted">
-                    Due {new Date(task.dueAt).toLocaleString(undefined, {
-                      month: "short",
-                      day: "numeric",
-                      hour: "numeric",
-                      minute: "2-digit",
-                    })}
+                    Due {formatUserDateTime(new Date(task.dueAt))}
                   </p>
                 )}
               </div>
