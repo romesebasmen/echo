@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   Memory,
   MemoryCategory,
@@ -9,6 +9,7 @@ import {
   hasResponseField,
   parseJsonResponse,
 } from "@/lib/echo/client/json-response";
+import { runExclusiveClientOperation } from "@/lib/echo/client/operation-gate";
 
 export interface MemoryEditInput {
   title?: string;
@@ -47,6 +48,7 @@ async function parseMemoryResponse(response: Response): Promise<MemoryResponse> 
 }
 
 export function useMemories() {
+  const mutationGate = useRef({ busy: false });
   const [memories, setMemories] = useState<Memory[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -75,55 +77,85 @@ export function useMemories() {
   }, [load]);
 
   async function editMemory(id: string, input: MemoryEditInput): Promise<boolean> {
-    setError(null);
-    setIsSaving(true);
-    try {
-      const response = await fetch(`/api/memories/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = await parseMemoryResponse(response);
-      setMemories((previous) =>
-        previous.map((memory) => (memory.id === id ? body.memory : memory)),
-      );
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update memory. Please try again.");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
+    const result = await runExclusiveClientOperation(
+      mutationGate.current,
+      async () => {
+        setError(null);
+        setIsSaving(true);
+        try {
+          const response = await fetch(`/api/memories/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          const body = await parseMemoryResponse(response);
+          setMemories((previous) =>
+            previous.map((memory) =>
+              memory.id === id ? body.memory : memory,
+            ),
+          );
+          return true;
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not update memory. Please try again.",
+          );
+          return false;
+        } finally {
+          setIsSaving(false);
+        }
+      },
+    );
+    return result.executed ? result.value : false;
   }
 
   async function archiveMemory(id: string): Promise<void> {
-    setError(null);
-    const previous = memories;
-    setMemories((current) => current.filter((memory) => memory.id !== id));
-    try {
-      const response = await fetch(`/api/memories/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "archived" }),
-      });
-      if (!response.ok) throw new Error(GENERIC_ERROR);
-    } catch (err) {
-      setMemories(previous);
-      setError(err instanceof Error ? err.message : "Could not archive memory. Please try again.");
-    }
+    await runExclusiveClientOperation(mutationGate.current, async () => {
+      setError(null);
+      setIsSaving(true);
+      const previous = memories;
+      setMemories((current) => current.filter((memory) => memory.id !== id));
+      try {
+        const response = await fetch(`/api/memories/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "archived" }),
+        });
+        if (!response.ok) throw new Error(GENERIC_ERROR);
+      } catch (err) {
+        setMemories(previous);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not archive memory. Please try again.",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    });
   }
 
   async function deleteMemoryById(id: string): Promise<void> {
-    setError(null);
-    const previous = memories;
-    setMemories((current) => current.filter((memory) => memory.id !== id));
-    try {
-      const response = await fetch(`/api/memories/${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(GENERIC_ERROR);
-    } catch (err) {
-      setMemories(previous);
-      setError(err instanceof Error ? err.message : "Could not delete memory. Please try again.");
-    }
+    await runExclusiveClientOperation(mutationGate.current, async () => {
+      setError(null);
+      setIsSaving(true);
+      const previous = memories;
+      setMemories((current) => current.filter((memory) => memory.id !== id));
+      try {
+        const response = await fetch(`/api/memories/${id}`, { method: "DELETE" });
+        if (!response.ok) throw new Error(GENERIC_ERROR);
+      } catch (err) {
+        setMemories(previous);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not delete memory. Please try again.",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    });
   }
 
   return {

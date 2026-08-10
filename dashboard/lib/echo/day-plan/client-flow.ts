@@ -2,10 +2,13 @@ import type {
   ApplyDayPlanRegenerationRequest,
   DayPlanRegenerationProposalEnvelope,
 } from "../types/day-plan-regeneration.ts";
+import {
+  runExclusiveClientOperation,
+  type OperationGate as SharedOperationGate,
+} from "../client/operation-gate.ts";
 
-export interface OperationGate {
-  busy: boolean;
-}
+export type OperationGate = SharedOperationGate;
+export const runExclusiveOperation = runExclusiveClientOperation;
 
 export class DayPlanClientRequestError extends Error {
   readonly status: number;
@@ -19,19 +22,6 @@ export class DayPlanClientRequestError extends Error {
 
 export function isStaleDayPlanClientError(error: unknown): boolean {
   return error instanceof DayPlanClientRequestError && error.status === 409;
-}
-
-export async function runExclusiveOperation<T>(
-  gate: OperationGate,
-  operation: () => Promise<T>,
-): Promise<{ executed: false } | { executed: true; value: T }> {
-  if (gate.busy) return { executed: false };
-  gate.busy = true;
-  try {
-    return { executed: true, value: await operation() };
-  } finally {
-    gate.busy = false;
-  }
 }
 
 export async function saveThenGenerate<Input, Saved, Generated>(

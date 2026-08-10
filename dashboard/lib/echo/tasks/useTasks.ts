@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   ResponsibilityArea,
   Task,
@@ -10,6 +10,7 @@ import {
   hasResponseField,
   parseJsonResponse,
 } from "@/lib/echo/client/json-response";
+import { runExclusiveClientOperation } from "@/lib/echo/client/operation-gate";
 
 export interface CreateTaskInput {
   title: string;
@@ -63,6 +64,7 @@ async function parseTaskResponse(response: Response): Promise<TaskResponse> {
 }
 
 export function useTasks() {
+  const mutationGate = useRef({ busy: false });
   const [tasks, setTasks] = useState<Task[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -91,43 +93,65 @@ export function useTasks() {
   }, [load]);
 
   async function createTask(input: CreateTaskInput): Promise<boolean> {
-    setError(null);
-    setIsSaving(true);
-    try {
-      const response = await fetch("/api/tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = await parseTaskResponse(response);
-      setTasks((previous) => [body.task, ...previous]);
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the task. Please try again.");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
+    const result = await runExclusiveClientOperation(
+      mutationGate.current,
+      async () => {
+        setError(null);
+        setIsSaving(true);
+        try {
+          const response = await fetch("/api/tasks", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          const body = await parseTaskResponse(response);
+          setTasks((previous) => [body.task, ...previous]);
+          return true;
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not create the task. Please try again.",
+          );
+          return false;
+        } finally {
+          setIsSaving(false);
+        }
+      },
+    );
+    return result.executed ? result.value : false;
   }
 
   async function updateTask(id: string, input: UpdateTaskInput): Promise<boolean> {
-    setError(null);
-    setIsSaving(true);
-    try {
-      const response = await fetch(`/api/tasks/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = await parseTaskResponse(response);
-      setTasks((previous) => previous.map((task) => (task.id === id ? body.task : task)));
-      return true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update the task. Please try again.");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
+    const result = await runExclusiveClientOperation(
+      mutationGate.current,
+      async () => {
+        setError(null);
+        setIsSaving(true);
+        try {
+          const response = await fetch(`/api/tasks/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          const body = await parseTaskResponse(response);
+          setTasks((previous) =>
+            previous.map((task) => (task.id === id ? body.task : task)),
+          );
+          return true;
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Could not update the task. Please try again.",
+          );
+          return false;
+        } finally {
+          setIsSaving(false);
+        }
+      },
+    );
+    return result.executed ? result.value : false;
   }
 
   async function toggleDone(task: Task): Promise<boolean> {
@@ -135,16 +159,25 @@ export function useTasks() {
   }
 
   async function deleteTask(id: string): Promise<void> {
-    setError(null);
-    const previous = tasks;
-    setTasks((current) => current.filter((task) => task.id !== id));
-    try {
-      const response = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
-      if (!response.ok) throw new Error(GENERIC_ERROR);
-    } catch (err) {
-      setTasks(previous);
-      setError(err instanceof Error ? err.message : "Could not delete the task. Please try again.");
-    }
+    await runExclusiveClientOperation(mutationGate.current, async () => {
+      setError(null);
+      setIsSaving(true);
+      const previous = tasks;
+      setTasks((current) => current.filter((task) => task.id !== id));
+      try {
+        const response = await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+        if (!response.ok) throw new Error(GENERIC_ERROR);
+      } catch (err) {
+        setTasks(previous);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not delete the task. Please try again.",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    });
   }
 
   return {

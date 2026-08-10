@@ -197,7 +197,7 @@ export function TasksPanel() {
 
         <button
           type="submit"
-          disabled={isSaving}
+          disabled={isLoading || isSaving}
           className="self-start rounded-md border border-foreground px-4 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving ? "Saving…" : "Add task"}
@@ -235,7 +235,8 @@ export function TasksPanel() {
                 <button
                   type="button"
                   onClick={() => toggleDone(task)}
-                  className="text-sm text-muted transition-colors hover:text-accent"
+                  disabled={isSaving}
+                  className="text-sm text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {task.status === "done" ? "Reopen" : "Complete"}
                 </button>
@@ -243,7 +244,8 @@ export function TasksPanel() {
                   type="button"
                   onClick={() => deleteTask(task.id)}
                   aria-label={`Delete task: ${task.title}`}
-                  className="text-sm text-muted transition-colors hover:text-accent"
+                  disabled={isSaving}
+                  className="text-sm text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   Delete
                 </button>

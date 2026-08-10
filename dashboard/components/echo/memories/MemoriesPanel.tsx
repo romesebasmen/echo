@@ -193,14 +193,16 @@ export function MemoriesPanel() {
                   <button
                     type="button"
                     onClick={() => startEditing(memory)}
-                    className="text-sm text-muted transition-colors hover:text-accent"
+                    disabled={isSaving}
+                    className="text-sm text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Edit
                   </button>
                   <button
                     type="button"
                     onClick={() => archiveMemory(memory.id)}
-                    className="text-sm text-muted transition-colors hover:text-accent"
+                    disabled={isSaving}
+                    className="text-sm text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Archive
                   </button>
@@ -208,7 +210,8 @@ export function MemoriesPanel() {
                     type="button"
                     onClick={() => deleteMemory(memory.id)}
                     aria-label={`Delete memory: ${memory.title}`}
-                    className="text-sm text-muted transition-colors hover:text-accent"
+                    disabled={isSaving}
+                    className="text-sm text-muted transition-colors hover:text-accent disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Delete
                   </button>

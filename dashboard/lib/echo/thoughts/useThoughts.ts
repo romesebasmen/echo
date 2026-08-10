@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Thought } from "@/lib/echo/types";
 import {
   hasResponseField,
   parseJsonResponse,
 } from "@/lib/echo/client/json-response";
+import { runExclusiveClientOperation } from "@/lib/echo/client/operation-gate";
 
 export interface ThoughtInput {
   content: string;
@@ -54,6 +55,7 @@ async function parseDeleteThoughtResponse(
 }
 
 export function useThoughts() {
+  const mutationGate = useRef({ busy: false });
   const [thoughts, setThoughts] = useState<Thought[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -82,63 +84,82 @@ export function useThoughts() {
   }, [loadThoughts]);
 
   async function createThought(input: ThoughtInput): Promise<boolean> {
-    setError(null);
-    setIsSaving(true);
-    try {
-      const response = await fetch("/api/thoughts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = await parseThoughtResponse(response);
-      setThoughts((previous) => [body.thought, ...previous]);
-      return true;
-    } catch {
-      setError("Could not save your thought. Please try again.");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
+    const result = await runExclusiveClientOperation(
+      mutationGate.current,
+      async () => {
+        setError(null);
+        setIsSaving(true);
+        try {
+          const response = await fetch("/api/thoughts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          const body = await parseThoughtResponse(response);
+          setThoughts((previous) => [body.thought, ...previous]);
+          return true;
+        } catch {
+          setError("Could not save your thought. Please try again.");
+          return false;
+        } finally {
+          setIsSaving(false);
+        }
+      },
+    );
+    return result.executed ? result.value : false;
   }
 
   async function updateThought(id: string, input: ThoughtInput): Promise<boolean> {
-    setError(null);
-    setIsSaving(true);
-    try {
-      const response = await fetch(`/api/thoughts/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(input),
-      });
-      const body = await parseThoughtResponse(response);
-      setThoughts((previous) =>
-        previous.map((thought) => (thought.id === id ? body.thought : thought)),
-      );
-      return true;
-    } catch {
-      setError("Could not update your thought. Please try again.");
-      return false;
-    } finally {
-      setIsSaving(false);
-    }
+    const result = await runExclusiveClientOperation(
+      mutationGate.current,
+      async () => {
+        setError(null);
+        setIsSaving(true);
+        try {
+          const response = await fetch(`/api/thoughts/${id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(input),
+          });
+          const body = await parseThoughtResponse(response);
+          setThoughts((previous) =>
+            previous.map((thought) =>
+              thought.id === id ? body.thought : thought,
+            ),
+          );
+          return true;
+        } catch {
+          setError("Could not update your thought. Please try again.");
+          return false;
+        } finally {
+          setIsSaving(false);
+        }
+      },
+    );
+    return result.executed ? result.value : false;
   }
 
   async function deleteThought(id: string): Promise<void> {
-    setError(null);
-    const previousThoughts = thoughts;
-    setThoughts((previous) => previous.filter((thought) => thought.id !== id));
+    await runExclusiveClientOperation(mutationGate.current, async () => {
+      setError(null);
+      setIsSaving(true);
+      const previousThoughts = thoughts;
+      setThoughts((previous) => previous.filter((thought) => thought.id !== id));
 
-    try {
-      const response = await fetch(`/api/thoughts/${id}`, { method: "DELETE" });
-      await parseDeleteThoughtResponse(response);
-    } catch (err) {
-      setThoughts(previousThoughts);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Could not delete your thought. Please try again.",
-      );
-    }
+      try {
+        const response = await fetch(`/api/thoughts/${id}`, { method: "DELETE" });
+        await parseDeleteThoughtResponse(response);
+      } catch (err) {
+        setThoughts(previousThoughts);
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Could not delete your thought. Please try again.",
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    });
   }
 
   return {

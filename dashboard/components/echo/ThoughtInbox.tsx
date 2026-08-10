@@ -151,7 +151,7 @@ export function ThoughtInbox() {
 
         <button
           type="submit"
-          disabled={isSaving}
+          disabled={isLoading || isSaving}
           className="self-start rounded-md border border-foreground px-4 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-foreground hover:text-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isSaving ? "Saving…" : "Save thought"}
@@ -242,7 +242,11 @@ export function ThoughtInbox() {
                   <button
                     type="button"
                     onClick={() => handleAddToTikTok(thought.id)}
-                    disabled={pendingThoughtId === thought.id || addedThoughtIds.has(thought.id)}
+                    disabled={
+                      isSaving ||
+                      pendingThoughtId !== null ||
+                      addedThoughtIds.has(thought.id)
+                    }
                     className="text-sm text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {addedThoughtIds.has(thought.id)
@@ -254,7 +258,8 @@ export function ThoughtInbox() {
                   <button
                     type="button"
                     onClick={() => startEditing(thought)}
-                    className="text-sm text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none"
+                    disabled={isSaving || pendingThoughtId !== null}
+                    className="text-sm text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Edit
                   </button>
@@ -262,7 +267,8 @@ export function ThoughtInbox() {
                     type="button"
                     onClick={() => deleteThought(thought.id)}
                     aria-label={`Delete thought: ${thought.content}`}
-                    className="text-sm text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none"
+                    disabled={isSaving || pendingThoughtId !== null}
+                    className="text-sm text-muted transition-colors hover:text-accent focus-visible:text-accent focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     Delete
                   </button>
