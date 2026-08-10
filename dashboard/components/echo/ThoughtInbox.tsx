@@ -4,6 +4,11 @@ import { useId, useState, type FormEvent } from "react";
 import type { Thought } from "@/lib/echo/types";
 import { useThoughts } from "@/lib/echo/thoughts/useThoughts";
 import { useCreativeWorks } from "@/lib/echo/creative-works/useCreativeWorks";
+import {
+  MAX_THOUGHT_CONTENT_LENGTH,
+  MAX_THOUGHT_CONTEXT_LENGTH,
+  MAX_THOUGHT_FORMAT_LENGTH,
+} from "@/lib/echo/thoughts/request";
 
 export function ThoughtInbox() {
   const { thoughts, isLoading, isSaving, error, createThought, updateThought, deleteThought } =
@@ -107,6 +112,7 @@ export function ThoughtInbox() {
             value={rawThought}
             onChange={(event) => setRawThought(event.target.value)}
             required
+            maxLength={MAX_THOUGHT_CONTENT_LENGTH}
             rows={3}
             className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent"
           />
@@ -121,6 +127,7 @@ export function ThoughtInbox() {
               id={contextId}
               type="text"
               value={context}
+              maxLength={MAX_THOUGHT_CONTEXT_LENGTH}
               onChange={(event) => setContext(event.target.value)}
               className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent"
             />
@@ -134,6 +141,7 @@ export function ThoughtInbox() {
               id={formatId}
               type="text"
               value={possibleFormat}
+              maxLength={MAX_THOUGHT_FORMAT_LENGTH}
               onChange={(event) => setPossibleFormat(event.target.value)}
               className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent"
             />
@@ -163,6 +171,7 @@ export function ThoughtInbox() {
                     value={editContent}
                     onChange={(event) => setEditContent(event.target.value)}
                     required
+                    maxLength={MAX_THOUGHT_CONTENT_LENGTH}
                     rows={3}
                     aria-label="Edit thought"
                     className="rounded-md border border-border bg-background px-3 py-2 text-base text-foreground outline-none focus:border-accent"
@@ -171,6 +180,7 @@ export function ThoughtInbox() {
                     <input
                       type="text"
                       value={editContext}
+                      maxLength={MAX_THOUGHT_CONTEXT_LENGTH}
                       onChange={(event) => setEditContext(event.target.value)}
                       aria-label="Edit context"
                       placeholder="Context (optional)"
@@ -179,6 +189,7 @@ export function ThoughtInbox() {
                     <input
                       type="text"
                       value={editFormat}
+                      maxLength={MAX_THOUGHT_FORMAT_LENGTH}
                       onChange={(event) => setEditFormat(event.target.value)}
                       aria-label="Edit possible format"
                       placeholder="Possible format (optional)"

@@ -4,6 +4,10 @@ import {
   encodeThoughtContent,
 } from "@/lib/echo/thoughts/content-encoding";
 import type { Thought } from "@/lib/echo/types";
+import {
+  InvalidThoughtRequestError,
+  parseThoughtWriteRequest,
+} from "@/lib/echo/thoughts/request";
 
 const USER_ID = "sebastian";
 
@@ -36,22 +40,19 @@ export async function PATCH(
 ) {
   try {
     const { id } = await params;
-    const body = (await request.json()) as Record<string, unknown>;
-    const content = typeof body.content === "string" ? body.content.trim() : "";
-
-    if (!content) {
-      return Response.json({ error: "Content is required." }, { status: 400 });
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json({ error: "Request body must be valid JSON." }, { status: 400 });
     }
+    const input = parseThoughtWriteRequest(body);
 
     const supabase = getSupabaseServerClient();
     const { data, error } = await supabase
       .from("thoughts")
       .update({
-        content: encodeThoughtContent(content, {
-          context: typeof body.context === "string" ? body.context : undefined,
-          possibleFormat:
-            typeof body.possibleFormat === "string" ? body.possibleFormat : undefined,
-        }),
+        content: encodeThoughtContent(input.content, input),
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)
@@ -63,6 +64,9 @@ export async function PATCH(
 
     return Response.json({ thought: toThought(data) });
   } catch (error) {
+    if (error instanceof InvalidThoughtRequestError) {
+      return Response.json({ error: error.message }, { status: 400 });
+    }
     console.error("PATCH /api/thoughts/[id] failed:", error);
     return Response.json({ error: "Could not update thought." }, { status: 500 });
   }
