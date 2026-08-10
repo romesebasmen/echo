@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { presentScheduleBlock } from "./schedule-presentation.ts";
+import {
+  presentScheduleBlock,
+  scheduleStepTiming,
+} from "./schedule-presentation.ts";
 import type { ScheduleBlock } from "../types/day-plan.ts";
 
 function block(overrides: Partial<ScheduleBlock> = {}): ScheduleBlock {
@@ -34,4 +37,30 @@ test("presentScheduleBlock identifies commitments and breaks", () => {
     "Commitment",
   );
   assert.equal(presentScheduleBlock(block({ sourceType: "break" })).kindLabel, "Break");
+});
+
+test("scheduleStepTiming distinguishes active, upcoming, and missed work", () => {
+  assert.equal(
+    scheduleStepTiming(block(), new Date("2026-08-09T14:45:00.000Z")),
+    "now",
+  );
+  assert.equal(
+    scheduleStepTiming(block(), new Date("2026-08-09T14:00:00.000Z")),
+    "next",
+  );
+  assert.equal(
+    scheduleStepTiming(block(), new Date("2026-08-09T15:15:00.000Z")),
+    "needs-attention",
+  );
+});
+
+test("scheduleStepTiming treats the exact start as active and exact end as missed", () => {
+  assert.equal(
+    scheduleStepTiming(block(), new Date("2026-08-09T14:30:00.000Z")),
+    "now",
+  );
+  assert.equal(
+    scheduleStepTiming(block(), new Date("2026-08-09T15:15:00.000Z")),
+    "needs-attention",
+  );
 });

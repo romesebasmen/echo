@@ -1,13 +1,17 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useDayPlan } from "@/lib/echo/day-plan/useDayPlan";
 import type { SaveDayPlanInput } from "@/lib/echo/day-plan/useDayPlan";
 import {
   dayPlanRegenerationErrorMessage,
   groupDayPlanRegenerationProposal,
 } from "@/lib/echo/day-plan/regeneration-presentation";
-import { presentScheduleBlock } from "@/lib/echo/day-plan/schedule-presentation";
+import {
+  presentScheduleBlock,
+  scheduleStepTiming,
+} from "@/lib/echo/day-plan/schedule-presentation";
+import { selectNextStep } from "@/lib/echo/day-plan/scheduler";
 import {
   fromUserDateTimeLocalString,
   toUserDateString,
@@ -318,7 +322,24 @@ interface TodayPlanProps {
 }
 
 function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const interval = window.setInterval(() => setNow(new Date()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
+
   if (dayPlan?.status !== "generated") return null;
+
+  const nextStep = selectNextStep(scheduleBlocks, now);
+  const nextStepPresentation = nextStep ? presentScheduleBlock(nextStep) : null;
+  const nextStepTiming = nextStep ? scheduleStepTiming(nextStep, now) : null;
+  const nextStepLabel =
+    nextStepTiming === "now"
+      ? "Now"
+      : nextStepTiming === "next"
+        ? "Up next"
+        : "Needs attention";
 
   return (
     <section aria-labelledby="today-plan-heading" className="mt-9 border-t border-border pt-8">
@@ -331,6 +352,16 @@ function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
           Commitments stay fixed. Task work and breaks reflect the capacity you shared today.
         </p>
       </div>
+
+      {nextStep && nextStepPresentation && (
+        <div className="mt-6 border-l-2 border-accent pl-4">
+          <p className="text-xs uppercase tracking-[0.16em] text-accent">{nextStepLabel}</p>
+          <p className="mt-1 text-base font-medium text-foreground">{nextStep.title}</p>
+          <p className="mt-1 text-sm text-muted">
+            {nextStepPresentation.timeRange} · {nextStepPresentation.kindLabel}
+          </p>
+        </div>
+      )}
 
       {scheduleBlocks.length === 0 ? (
         <p className="mt-6 text-sm text-muted">
@@ -346,7 +377,10 @@ function TodayPlan({ dayPlan, scheduleBlocks, unscheduled }: TodayPlanProps) {
             return (
               <li
                 key={block.id}
-                className="grid gap-2 border-t border-border py-4 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-6"
+                aria-current={nextStep?.id === block.id ? "step" : undefined}
+                className={`grid gap-2 border-t py-4 sm:grid-cols-[8.5rem_minmax(0,1fr)] sm:gap-6 ${
+                  nextStep?.id === block.id ? "border-accent/50" : "border-border"
+                }`}
               >
                 <time
                   dateTime={block.startTime}
