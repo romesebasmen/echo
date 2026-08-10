@@ -160,7 +160,6 @@ export async function POST(request: Request) {
               userMessage: content,
               echoReply: replyText,
               sourceMessageId: userRow.id as string,
-              sourceType: "chat",
             });
             if (appliedCount > 0) {
               console.log(

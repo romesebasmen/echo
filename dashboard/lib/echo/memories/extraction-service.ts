@@ -1,80 +1,39 @@
 import { extractMemoryOperations } from "@/lib/echo/ai/claude-memory-extraction";
-import { createMemory, listMemories, updateMemory } from "@/lib/echo/memories/repository";
-import type { MemorySourceType } from "@/lib/echo/types";
+import { listMemories } from "@/lib/echo/memories/repository";
+import { runWithAiOperationLease } from "@/lib/echo/ai/operation-lease-server";
+import { createMemoryExtractionWorkflow } from "@/lib/echo/memories/extraction-workflow";
+import {
+  applyMemoryOperationsAtomically,
+  hasCompletedMemoryExtraction,
+} from "@/lib/echo/memories/extraction-repository";
 
 export interface ExtractAndApplyInput {
   userMessage: string;
   echoReply: string;
-  sourceMessageId: string | null;
-  sourceType: MemorySourceType;
+  sourceMessageId: string;
 }
 
 // Runs after a chat exchange completes. Never throws to the caller by
 // design (see the try/catch this is invoked from) — a failure here must
 // never affect the chat response itself.
-export async function extractAndApplyMemories(
-  input: ExtractAndApplyInput,
-): Promise<number> {
-  const existing = await listMemories({ status: "active", limit: 50 });
-
-  const operations = await extractMemoryOperations({
-    userMessage: input.userMessage,
-    echoReply: input.echoReply,
-    existingMemories: existing.map((memory) => ({
+const runMemoryExtraction = createMemoryExtractionWorkflow({
+  runExclusive: runWithAiOperationLease,
+  hasCompleted: hasCompletedMemoryExtraction,
+  async listActiveMemories() {
+    const existing = await listMemories({ status: "active", limit: 50 });
+    return existing.map((memory) => ({
       id: memory.id,
       category: memory.category,
       title: memory.title,
       description: memory.description,
-    })),
-  });
+    }));
+  },
+  extract: extractMemoryOperations,
+  applyAtomically: applyMemoryOperationsAtomically,
+});
 
-  let appliedCount = 0;
-
-  for (const operation of operations) {
-    if (operation.action === "create") {
-      await createMemory({
-        category: operation.category,
-        title: operation.title,
-        description: operation.description,
-        importance: operation.importance,
-        confidence: operation.confidence,
-        sourceType: input.sourceType,
-        sourceMessageId: input.sourceMessageId,
-      });
-      appliedCount += 1;
-      continue;
-    }
-
-    if (!operation.targetMemoryId) {
-      continue;
-    }
-
-    if (operation.action === "update") {
-      await updateMemory(operation.targetMemoryId, {
-        category: operation.category,
-        title: operation.title,
-        description: operation.description,
-        importance: operation.importance,
-        confidence: operation.confidence,
-      });
-      appliedCount += 1;
-      continue;
-    }
-
-    // "supersede": the old memory is kept but marked no longer current,
-    // and the replacement is created as its own active memory.
-    await updateMemory(operation.targetMemoryId, { status: "superseded" });
-    await createMemory({
-      category: operation.category,
-      title: operation.title,
-      description: operation.description,
-      importance: operation.importance,
-      confidence: operation.confidence,
-      sourceType: input.sourceType,
-      sourceMessageId: input.sourceMessageId,
-    });
-    appliedCount += 1;
-  }
-
-  return appliedCount;
+export async function extractAndApplyMemories(
+  input: ExtractAndApplyInput,
+): Promise<number> {
+  return runMemoryExtraction(input);
 }

@@ -96,7 +96,12 @@ export async function releaseAiOperationLeaseWithRpc(
 }
 
 export function createAiOperationKey(
-  scope: "briefing" | "chat" | "day-plan-regeneration" | "tiktok-package",
+  scope:
+    | "briefing"
+    | "chat"
+    | "day-plan-regeneration"
+    | "memory-extraction"
+    | "tiktok-package",
   identifier: string,
 ): string {
   const operationKey = `${scope}:${identifier}`;

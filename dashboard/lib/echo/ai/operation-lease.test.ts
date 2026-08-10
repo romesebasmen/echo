@@ -18,6 +18,10 @@ test("creates bounded, non-sensitive operation keys for every provider scope", (
     createAiOperationKey("briefing", "2026-08-09"),
     "briefing:2026-08-09",
   );
+  assert.equal(
+    createAiOperationKey("memory-extraction", "message-1"),
+    "memory-extraction:message-1",
+  );
   assert.throws(
     () => createAiOperationKey("tiktok-package", "contains private text"),
     AiOperationLeaseUnavailableError,
@@ -151,4 +155,15 @@ test("every user-triggered paid generation entry point uses the durable lease", 
     assert.match(source, /runWithAiOperationLease/, relativePath);
     assert.match(source, /createAiOperationKey/, relativePath);
   }
+
+  const extractionService = readFileSync(
+    new URL("../memories/extraction-service.ts", import.meta.url),
+    "utf8",
+  );
+  const extractionWorkflow = readFileSync(
+    new URL("../memories/extraction-workflow.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(extractionService, /runWithAiOperationLease/);
+  assert.match(extractionWorkflow, /createAiOperationKey\("memory-extraction"/);
 });
