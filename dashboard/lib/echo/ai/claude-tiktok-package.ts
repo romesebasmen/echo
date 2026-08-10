@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { TIKTOK_PACKAGE_SYSTEM_PROMPT } from "@/lib/echo/ai/tiktok-package-prompt";
-import type { CreativeWorkPackage } from "@/lib/echo/types";
+import { TIKTOK_PACKAGE_SYSTEM_PROMPT } from "./tiktok-package-prompt.ts";
+import type { CreativeWorkPackage } from "../types/index.ts";
 
 // SERVER-ONLY. Import this only from Route Handlers (app/api/**/route.ts).
 // ANTHROPIC_API_KEY is read here and must never reach the browser bundle.
@@ -29,6 +29,13 @@ export interface TikTokPackageGenerationInput {
 
 let cachedClient: Anthropic | null = null;
 
+export const TIKTOK_PACKAGE_MODEL = "claude-opus-4-8";
+export const TIKTOK_PACKAGE_MAX_RETRIES = 0;
+
+export function createAnthropicTikTokPackageClient(apiKey: string): Anthropic {
+  return new Anthropic({ apiKey, maxRetries: TIKTOK_PACKAGE_MAX_RETRIES });
+}
+
 function getClient(): Anthropic {
   if (cachedClient) {
     return cachedClient;
@@ -39,7 +46,7 @@ function getClient(): Anthropic {
     throw new Error("Missing ANTHROPIC_API_KEY environment variable.");
   }
 
-  cachedClient = new Anthropic({ apiKey });
+  cachedClient = createAnthropicTikTokPackageClient(apiKey);
   return cachedClient;
 }
 
@@ -185,7 +192,7 @@ export async function generateTikTokPackage(
   logPromptSizeBreakdown(input, sections);
 
   const response = await client.messages.create({
-    model: "claude-opus-4-8",
+    model: TIKTOK_PACKAGE_MODEL,
     max_tokens: 1536,
     system: TIKTOK_PACKAGE_SYSTEM_PROMPT,
     output_config: {

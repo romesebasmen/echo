@@ -1,4 +1,4 @@
-import { ECHO_SYSTEM_PROMPT } from "@/lib/echo/ai/system-prompt";
+import { ECHO_SYSTEM_PROMPT } from "./system-prompt.ts";
 
 export const TIKTOK_PACKAGE_SYSTEM_PROMPT = `${ECHO_SYSTEM_PROMPT}
 

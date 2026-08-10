@@ -1,11 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { MEMORY_EXTRACTION_SYSTEM_PROMPT } from "@/lib/echo/ai/memory-extraction-prompt";
-import { formatError } from "@/lib/echo/errors";
+import { MEMORY_EXTRACTION_SYSTEM_PROMPT } from "./memory-extraction-prompt.ts";
 import type {
   MemoryCategory,
   MemoryConfidence,
   MemoryImportance,
-} from "@/lib/echo/types";
+} from "../types/index.ts";
 
 // SERVER-ONLY. Import this only from Route Handlers / server-only modules.
 // ANTHROPIC_API_KEY is read here and must never reach the browser bundle.
@@ -25,7 +24,8 @@ const MEMORY_CATEGORIES: MemoryCategory[] = [
 const IMPORTANCE_LEVELS: MemoryImportance[] = ["low", "medium", "high"];
 const CONFIDENCE_LEVELS: MemoryConfidence[] = ["low", "medium", "high"];
 
-const MAX_ATTEMPTS = 2;
+export const MEMORY_EXTRACTION_MODEL = "claude-opus-4-8";
+export const MEMORY_EXTRACTION_MAX_RETRIES = 0;
 
 export interface ExistingMemoryContext {
   id: string;
@@ -54,6 +54,10 @@ export interface MemoryOperation {
 
 let cachedClient: Anthropic | null = null;
 
+export function createAnthropicMemoryExtractionClient(apiKey: string): Anthropic {
+  return new Anthropic({ apiKey, maxRetries: MEMORY_EXTRACTION_MAX_RETRIES });
+}
+
 function getClient(): Anthropic {
   if (cachedClient) {
     return cachedClient;
@@ -64,7 +68,7 @@ function getClient(): Anthropic {
     throw new Error("Missing ANTHROPIC_API_KEY environment variable.");
   }
 
-  cachedClient = new Anthropic({ apiKey });
+  cachedClient = createAnthropicMemoryExtractionClient(apiKey);
   return cachedClient;
 }
 
@@ -101,34 +105,23 @@ const MEMORY_EXTRACTION_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-// Wrapped with one retry: a single transient failure (a flaky response, a
-// JSON parse hiccup) should not mean a durable preference silently never
-// gets captured. See docs/echo-constitution.md — reliability of capture
-// matters here, not just correctness of the extraction logic.
-export async function extractMemoryOperations(
-  input: MemoryExtractionInput,
-): Promise<MemoryOperation[]> {
-  let lastError: unknown;
-
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    try {
-      return await attemptExtraction(input);
-    } catch (error) {
-      lastError = error;
-      console.error(`Memory extraction attempt ${attempt} failed:`, formatError(error));
-    }
-  }
-
-  throw lastError;
+// Memory extraction is best-effort background enrichment. One user chat
+// exchange produces at most one provider request; failures are surfaced to
+// the caller and never retried implicitly.
+interface MemoryExtractionResponse {
+  content: readonly { type: string; text?: string }[];
 }
+
+export type MemoryExtractionMessageCaller = (
+  params: Anthropic.MessageCreateParamsNonStreaming,
+) => Promise<MemoryExtractionResponse>;
 
 async function attemptExtraction(
   input: MemoryExtractionInput,
+  callModel: MemoryExtractionMessageCaller,
 ): Promise<MemoryOperation[]> {
-  const client = getClient();
-
-  const response = await client.messages.create({
-    model: "claude-opus-4-8",
+  const response = await callModel({
+    model: MEMORY_EXTRACTION_MODEL,
     max_tokens: 1024,
     system: MEMORY_EXTRACTION_SYSTEM_PROMPT,
     output_config: {
@@ -137,8 +130,10 @@ async function attemptExtraction(
     messages: [{ role: "user", content: buildUserPrompt(input) }],
   });
 
-  const textBlock = response.content.find((block) => block.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
+  const textBlock = response.content.find(
+    (block) => block.type === "text" && typeof block.text === "string",
+  );
+  if (!textBlock?.text) {
     throw new Error("Memory extraction response contained no text content.");
   }
 
@@ -149,6 +144,20 @@ async function attemptExtraction(
 
   return parsed.operations.filter(isValidOperation);
 }
+
+export function createMemoryOperationsExtractor(
+  callModel: MemoryExtractionMessageCaller,
+) {
+  return (input: MemoryExtractionInput): Promise<MemoryOperation[]> =>
+    attemptExtraction(input, callModel);
+}
+
+export const extractMemoryOperations = createMemoryOperationsExtractor(
+  async (params) => {
+    const client = getClient();
+    return client.messages.create(params);
+  },
+);
 
 function isValidOperation(value: unknown): value is MemoryOperation {
   if (typeof value !== "object" || value === null) return false;

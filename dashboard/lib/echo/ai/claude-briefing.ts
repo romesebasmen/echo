@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { BRIEFING_SYSTEM_PROMPT } from "@/lib/echo/ai/briefing-system-prompt";
-import type { BriefingPatternKind } from "@/lib/echo/types";
+import { BRIEFING_SYSTEM_PROMPT } from "./briefing-system-prompt.ts";
+import type { BriefingPatternKind } from "../types/index.ts";
 
 // SERVER-ONLY. Import this only from Route Handlers (app/api/**/route.ts).
 // ANTHROPIC_API_KEY is read here and must never reach the browser bundle.
@@ -31,6 +31,13 @@ export interface GeneratedBriefingContent {
 
 let cachedClient: Anthropic | null = null;
 
+export const BRIEFING_MODEL = "claude-opus-4-8";
+export const BRIEFING_MAX_RETRIES = 0;
+
+export function createAnthropicBriefingClient(apiKey: string): Anthropic {
+  return new Anthropic({ apiKey, maxRetries: BRIEFING_MAX_RETRIES });
+}
+
 function getClient(): Anthropic {
   if (cachedClient) {
     return cachedClient;
@@ -41,7 +48,7 @@ function getClient(): Anthropic {
     throw new Error("Missing ANTHROPIC_API_KEY environment variable.");
   }
 
-  cachedClient = new Anthropic({ apiKey });
+  cachedClient = createAnthropicBriefingClient(apiKey);
   return cachedClient;
 }
 
@@ -78,7 +85,7 @@ export async function generateBriefingContent(
   const client = getClient();
 
   const response = await client.messages.create({
-    model: "claude-opus-4-8",
+    model: BRIEFING_MODEL,
     max_tokens: 1024,
     system: BRIEFING_SYSTEM_PROMPT,
     output_config: {
