@@ -12,6 +12,7 @@ import {
   todayDateString,
 } from "@/lib/echo/daily-briefing/repository";
 import type { DailyBriefing } from "@/lib/echo/types";
+import { runBriefingGenerationSingleFlight } from "@/lib/echo/daily-briefing/generation-single-flight";
 
 const RECENT_MESSAGE_LIMIT = 20;
 const RECENT_THOUGHT_LIMIT = 10;
@@ -96,9 +97,14 @@ export async function getTodaysBriefing(): Promise<DailyBriefing> {
   const briefingDate = todayDateString();
   const cached = await getBriefingForDate(briefingDate);
   if (cached) return cached;
-  return buildAndSaveBriefing(briefingDate);
+  return runBriefingGenerationSingleFlight(briefingDate, () =>
+    buildAndSaveBriefing(briefingDate),
+  );
 }
 
 export async function regenerateTodaysBriefing(): Promise<DailyBriefing> {
-  return buildAndSaveBriefing(todayDateString());
+  const briefingDate = todayDateString();
+  return runBriefingGenerationSingleFlight(briefingDate, () =>
+    buildAndSaveBriefing(briefingDate),
+  );
 }
