@@ -150,6 +150,7 @@ const PUBLIC_PATHS = new Set([
   "/vercel.svg",
   "/window.svg",
 ]);
+const SAFE_REQUEST_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 
 function isPublicPath(pathname: string): boolean {
   return (
@@ -157,6 +158,23 @@ function isPublicPath(pathname: string): boolean {
     (pathname.startsWith("/_next/") &&
       !pathname.startsWith("/_next/data/"))
   );
+}
+
+function isSameOriginMutation(request: NextRequest): boolean {
+  if (SAFE_REQUEST_METHODS.has(request.method.toUpperCase())) {
+    return true;
+  }
+
+  const origin = request.headers.get("origin");
+  if (!origin) {
+    return false;
+  }
+
+  try {
+    return new URL(origin).origin === request.nextUrl.origin;
+  } catch {
+    return false;
+  }
 }
 
 export type AccessGateDependencies = {
@@ -208,6 +226,17 @@ export async function gateEchoRequest(
       );
     }
     return NextResponse.redirect(new URL("/login", request.url));
+  }
+
+  // SameSite=Lax is the first CSRF boundary for Echo's session cookie. The
+  // explicit Origin check is defense in depth for every authenticated
+  // mutation and runs here, before a Route Handler can reach Supabase or an
+  // AI provider. Login remains public and reveals no privileged state.
+  if (!isSameOriginMutation(request)) {
+    return NextResponse.json(
+      { error: "Cross-site requests are not allowed." },
+      { status: 403 },
+    );
   }
 
   return NextResponse.next();

@@ -21,6 +21,23 @@ function request(path: string, token?: string, method = "GET"): NextRequest {
   return new NextRequest(`http://localhost:3000${path}`, { headers, method });
 }
 
+function mutationRequest(
+  path: string,
+  token: string,
+  origin?: string,
+): NextRequest {
+  const headers = new Headers({
+    cookie: `${ECHO_SESSION_COOKIE}=${token}`,
+  });
+  if (origin) {
+    headers.set("origin", origin);
+  }
+  return new NextRequest(`http://localhost:3000${path}`, {
+    headers,
+    method: "POST",
+  });
+}
+
 const dependencies = {
   getSessionSecret: () => SECRET,
   now: () => NOW,
@@ -95,6 +112,48 @@ test("authenticated API access proceeds", async () => {
 
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("x-middleware-next"), "1");
+});
+
+test("authenticated same-origin mutations proceed", async () => {
+  const token = createEchoSessionToken(SECRET, NOW);
+  const response = await gateEchoRequest(
+    mutationRequest("/api/tasks", token, "http://localhost:3000"),
+    dependencies,
+  );
+
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-middleware-next"), "1");
+});
+
+test("authenticated cross-site mutations are rejected before route handling", async () => {
+  const token = createEchoSessionToken(SECRET, NOW);
+
+  for (const origin of [
+    undefined,
+    "null",
+    "https://attacker.example",
+    "http://localhost:3001",
+  ]) {
+    const response = await gateEchoRequest(
+      mutationRequest("/api/day-plan/regenerate", token, origin),
+      dependencies,
+    );
+
+    assert.equal(response.status, 403, origin ?? "missing Origin");
+    assert.deepEqual(await response.json(), {
+      error: "Cross-site requests are not allowed.",
+    });
+  }
+});
+
+test("unauthenticated mutations are rejected before origin validation", async () => {
+  const response = await gateEchoRequest(
+    request("/api/tasks", undefined, "POST"),
+    dependencies,
+  );
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { error: "Authentication required." });
 });
 
 test("missing configuration fails closed before protected APIs", async () => {
