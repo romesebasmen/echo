@@ -26,6 +26,16 @@ const CONFIDENCE_LEVELS: MemoryConfidence[] = ["low", "medium", "high"];
 
 export const MEMORY_EXTRACTION_MODEL = "claude-opus-4-8";
 export const MEMORY_EXTRACTION_MAX_RETRIES = 0;
+export const MAX_MEMORY_OPERATIONS_PER_EXTRACTION = 10;
+export const MAX_MEMORY_TITLE_LENGTH = 100;
+export const MAX_MEMORY_DESCRIPTION_LENGTH = 500;
+
+export class InvalidMemoryExtractionResponseError extends Error {
+  constructor(reason: string) {
+    super(`Memory extraction response failed validation: ${reason}`);
+    this.name = "InvalidMemoryExtractionResponseError";
+  }
+}
 
 export interface ExistingMemoryContext {
   id: string;
@@ -77,14 +87,23 @@ const MEMORY_EXTRACTION_SCHEMA = {
   properties: {
     operations: {
       type: "array",
+      maxItems: MAX_MEMORY_OPERATIONS_PER_EXTRACTION,
       items: {
         type: "object",
         properties: {
           action: { type: "string", enum: ["create", "update", "supersede"] },
           targetMemoryId: { type: ["string", "null"] },
           category: { type: "string", enum: MEMORY_CATEGORIES },
-          title: { type: "string" },
-          description: { type: "string" },
+          title: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_MEMORY_TITLE_LENGTH,
+          },
+          description: {
+            type: "string",
+            minLength: 1,
+            maxLength: MAX_MEMORY_DESCRIPTION_LENGTH,
+          },
           importance: { type: "string", enum: IMPORTANCE_LEVELS },
           confidence: { type: "string", enum: CONFIDENCE_LEVELS },
         },
@@ -137,12 +156,14 @@ async function attemptExtraction(
     throw new Error("Memory extraction response contained no text content.");
   }
 
-  const parsed = JSON.parse(textBlock.text) as { operations?: unknown };
-  if (!Array.isArray(parsed.operations)) {
-    throw new Error("Memory extraction response was missing an operations array.");
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(textBlock.text);
+  } catch {
+    throw new InvalidMemoryExtractionResponseError("response was not valid JSON");
   }
 
-  return parsed.operations.filter(isValidOperation);
+  return validateMemoryOperations(parsed, input.existingMemories);
 }
 
 export function createMemoryOperationsExtractor(
@@ -159,38 +180,128 @@ export const extractMemoryOperations = createMemoryOperationsExtractor(
   },
 );
 
-function isValidOperation(value: unknown): value is MemoryOperation {
-  if (typeof value !== "object" || value === null) return false;
+const MEMORY_OPERATION_KEYS = [
+  "action",
+  "category",
+  "confidence",
+  "description",
+  "importance",
+  "targetMemoryId",
+  "title",
+];
+
+function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(value).sort();
+  return actual.length === keys.length && actual.every((key, index) => key === keys[index]);
+}
+
+function parseMemoryOperation(
+  value: unknown,
+  existingMemoryIds: ReadonlySet<string>,
+): MemoryOperation {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new InvalidMemoryExtractionResponseError("operation must be an object");
+  }
   const op = value as Record<string, unknown>;
+
+  if (!hasExactKeys(op, MEMORY_OPERATION_KEYS)) {
+    throw new InvalidMemoryExtractionResponseError(
+      "operation fields did not match the contract",
+    );
+  }
 
   const hasValidAction =
     op.action === "create" || op.action === "update" || op.action === "supersede";
   const hasValidCategory =
     typeof op.category === "string" &&
     MEMORY_CATEGORIES.includes(op.category as MemoryCategory);
-  const hasValidTitle = typeof op.title === "string" && op.title.trim().length > 0;
+  const title = typeof op.title === "string" ? op.title.trim() : "";
+  const description =
+    typeof op.description === "string" ? op.description.trim() : "";
+  const hasValidTitle =
+    title.length > 0 && title.length <= MAX_MEMORY_TITLE_LENGTH;
   const hasValidDescription =
-    typeof op.description === "string" && op.description.trim().length > 0;
+    description.length > 0 &&
+    description.length <= MAX_MEMORY_DESCRIPTION_LENGTH;
   const hasValidImportance =
     typeof op.importance === "string" &&
     IMPORTANCE_LEVELS.includes(op.importance as MemoryImportance);
   const hasValidConfidence =
     typeof op.confidence === "string" &&
     CONFIDENCE_LEVELS.includes(op.confidence as MemoryConfidence);
-  const hasValidTarget = op.targetMemoryId === null || typeof op.targetMemoryId === "string";
-  const targetPresentWhenRequired =
-    op.action === "create" || (typeof op.targetMemoryId === "string" && op.targetMemoryId.length > 0);
+  if (
+    !hasValidAction ||
+    !hasValidCategory ||
+    !hasValidTitle ||
+    !hasValidDescription ||
+    !hasValidImportance ||
+    !hasValidConfidence
+  ) {
+    throw new InvalidMemoryExtractionResponseError(
+      "operation contained an invalid field value",
+    );
+  }
 
-  return (
-    hasValidAction &&
-    hasValidCategory &&
-    hasValidTitle &&
-    hasValidDescription &&
-    hasValidImportance &&
-    hasValidConfidence &&
-    hasValidTarget &&
-    targetPresentWhenRequired
-  );
+  if (op.action === "create" && op.targetMemoryId !== null) {
+    throw new InvalidMemoryExtractionResponseError(
+      "create operation must have a null targetMemoryId",
+    );
+  }
+
+  if (
+    op.action !== "create" &&
+    (typeof op.targetMemoryId !== "string" ||
+      !existingMemoryIds.has(op.targetMemoryId))
+  ) {
+    throw new InvalidMemoryExtractionResponseError(
+      "update or supersede target was not an active supplied memory",
+    );
+  }
+
+  return {
+    action: op.action as MemoryOperationAction,
+    targetMemoryId:
+      op.action === "create" ? null : (op.targetMemoryId as string),
+    category: op.category as MemoryCategory,
+    title,
+    description,
+    importance: op.importance as MemoryImportance,
+    confidence: op.confidence as MemoryConfidence,
+  };
+}
+
+export function validateMemoryOperations(
+  value: unknown,
+  existingMemories: readonly ExistingMemoryContext[],
+): MemoryOperation[] {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new InvalidMemoryExtractionResponseError("response must be an object");
+  }
+
+  const response = value as Record<string, unknown>;
+  if (!hasExactKeys(response, ["operations"]) || !Array.isArray(response.operations)) {
+    throw new InvalidMemoryExtractionResponseError(
+      "response must contain only an operations array",
+    );
+  }
+  if (response.operations.length > MAX_MEMORY_OPERATIONS_PER_EXTRACTION) {
+    throw new InvalidMemoryExtractionResponseError("too many memory operations");
+  }
+
+  const existingMemoryIds = new Set(existingMemories.map((memory) => memory.id));
+  const targetedMemoryIds = new Set<string>();
+  return response.operations.map((operation) => {
+    const parsed = parseMemoryOperation(operation, existingMemoryIds);
+    if (parsed.targetMemoryId) {
+      if (targetedMemoryIds.has(parsed.targetMemoryId)) {
+        throw new InvalidMemoryExtractionResponseError(
+          "an active memory was targeted more than once",
+        );
+      }
+      targetedMemoryIds.add(parsed.targetMemoryId);
+    }
+    return parsed;
+  });
 }
 
 function buildUserPrompt(input: MemoryExtractionInput): string {
