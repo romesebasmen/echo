@@ -32,6 +32,14 @@ export function WelcomeHeader() {
         >
           Talk to Echo →
         </Link>
+        <form action="/api/auth/logout" method="post">
+          <button
+            type="submit"
+            className="text-sm font-medium text-muted transition-colors hover:text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+          >
+            Log out
+          </button>
+        </form>
       </div>
     </header>
   );
