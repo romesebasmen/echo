@@ -56,16 +56,32 @@ export async function loadCurrentDayPlanState(
     return { dayPlan, planningContext, scheduleBlocks: [], unscheduled: [] };
   }
 
-  const [scheduleBlocks, openTasks] = await Promise.all([
+  const [persistedScheduleBlocks, tasks] = await Promise.all([
     deps.listScheduleBlocks(dayPlan.id),
-    deps.listTasks({ status: "open" }),
+    deps.listTasks({}),
   ]);
+  const taskById = new Map(tasks.map((task) => [task.id, task]));
+  const scheduleBlocks = persistedScheduleBlocks.flatMap((block) => {
+    if (block.sourceType !== "task") return [block];
+
+    const sourceTask = block.sourceId ? taskById.get(block.sourceId) : null;
+    // A deleted task must not survive as an apparently actionable plan item.
+    if (!sourceTask) return [];
+
+    // Task status is authoritative even if it was changed from the Tasks
+    // page instead of through the day-plan action endpoint.
+    if (block.status === "scheduled" && sourceTask.status === "done") {
+      return [{ ...block, status: "completed" as const }];
+    }
+    return [block];
+  });
+  const openTasks = tasks.filter((task) => task.status === "open");
   const plannedTaskIds = new Set(
     scheduleBlocks
       .filter(
         (block) =>
           block.sourceType === "task" &&
-          block.status !== "skipped" &&
+          block.status === "scheduled" &&
           block.sourceId !== null,
       )
       .map((block) => block.sourceId as string),

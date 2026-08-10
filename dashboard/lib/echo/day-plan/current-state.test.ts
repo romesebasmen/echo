@@ -184,3 +184,56 @@ test("a skipped task block returns its still-open task to unscheduled", async ()
 
   assert.deepEqual(result.unscheduled.map((item) => item.id), [task.id]);
 });
+
+test("a task completed outside the plan no longer appears actionable", async () => {
+  const task = fakeTask("done-elsewhere", {
+    status: "done",
+    completedAt: "2026-08-09T15:00:00.000Z",
+  });
+  const result = await loadCurrentDayPlanState(
+    "2026-08-09",
+    depsFor({
+      dayPlan: fakeDayPlan(),
+      blocks: [fakeBlock("scheduled", "task", task.id)],
+      tasks: [task],
+    }),
+  );
+
+  assert.equal(result.scheduleBlocks[0]?.status, "completed");
+  assert.deepEqual(result.unscheduled, []);
+});
+
+test("a reopened task with a completed block returns to unscheduled", async () => {
+  const task = fakeTask("reopened");
+  const result = await loadCurrentDayPlanState(
+    "2026-08-09",
+    depsFor({
+      dayPlan: fakeDayPlan(),
+      blocks: [
+        { ...fakeBlock("completed", "task", task.id), status: "completed" },
+      ],
+      tasks: [task],
+    }),
+  );
+
+  assert.equal(result.scheduleBlocks[0]?.status, "completed");
+  assert.deepEqual(result.unscheduled.map((item) => item.id), [task.id]);
+});
+
+test("a deleted task cannot remain as an actionable persisted block", async () => {
+  const result = await loadCurrentDayPlanState(
+    "2026-08-09",
+    depsFor({
+      dayPlan: fakeDayPlan(),
+      blocks: [
+        fakeBlock("deleted-task", "task", "missing-task"),
+        fakeBlock("commitment", "commitment", "commitment-1"),
+      ],
+      tasks: [],
+    }),
+  );
+
+  assert.deepEqual(result.scheduleBlocks.map((block) => block.sourceType), [
+    "commitment",
+  ]);
+});
